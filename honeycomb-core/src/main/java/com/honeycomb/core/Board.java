@@ -1,26 +1,27 @@
 package com.honeycomb.core;
 
 /**
- * Bit-board representation of the Honeycomb game field. The board consists of 55 hexagonal cells
- * arranged in a triangular grid of height 10. Each cell is mapped to a bit position inside a long
- * value. Bit index 0 corresponds to the single cell in the top row and indices grow row by row
- * until index 54 in the bottom row.
+ * Immutable bitboard representation of the Honeycomb game field.
+ * Each cell corresponds to a bit in a 55-bit long value.
+ * The board also tracks which player's turn it is.
  */
-public class Board {
+public final class Board {
 
     public static final int CELL_COUNT = 55;
 
     private final long bits;
+    private final boolean firstPlayer; // true = first player's turn, false = second player's turn
 
     /**
-     * Creates an empty board.
+     * Creates an empty board with the first player to move.
      */
     public Board() {
-        this(0L);
+        this(0L, true);
     }
 
-    private Board(long bits) {
+    private Board(long bits, boolean firstPlayer) {
         this.bits = bits;
+        this.firstPlayer = firstPlayer;
     }
 
     /**
@@ -32,15 +33,22 @@ public class Board {
     }
 
     /**
-     * Returns a new board instance with the cell at {@code index} marked as occupied.
+     * Returns a new Board instance with the specified cell marked as occupied.
+     * Automatically toggles the active player.
      */
     public Board withCell(int index) {
         checkIndex(index);
-        return new Board(bits | (1L << index));
+        if (!isEmpty(index)) {
+            throw new IllegalArgumentException("Cell " + index + " is already occupied");
+        }
+
+        long updatedBits = bits | (1L << index);
+        boolean nextPlayer = !firstPlayer; // invert turn
+        return new Board(updatedBits, nextPlayer);
     }
 
     /**
-     * Returns the number of occupied cells on the board.
+     * Returns the number of occupied cells.
      */
     public int countBits() {
         return Long.bitCount(bits);
@@ -58,6 +66,13 @@ public class Board {
      */
     public boolean isFull() {
         return countBits() == CELL_COUNT;
+    }
+
+    /**
+     * Returns {@code true} if it is currently the first player's turn.
+     */
+    public boolean isFirstPlayer() {
+        return firstPlayer;
     }
 
     private static void checkIndex(int index) {

@@ -78,7 +78,7 @@ public final class ScoreCalculator {
         for (int lineIndex : LINES_BY_CELL[cellIndex]) {
             long mask = LINE_MASKS[lineIndex];
             if ((previousBoard & mask) != mask && (updatedBoard & mask) == mask) {
-                delta++;
+                delta+= Long.bitCount(mask);
             }
         }
         return delta;

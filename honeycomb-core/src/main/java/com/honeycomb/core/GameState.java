@@ -1,26 +1,27 @@
 package com.honeycomb.core;
 
 /**
- * Immutable representation of the current state of a Honeycomb match. The state keeps track of the
- * board occupancy, the current scores of both players and the move number.
+ * Immutable representation of the current state of a Honeycomb match.
+ * The state keeps track of the board occupancy, both players' scores,
+ * and the current move number.
  */
 public final class GameState {
 
     private final Board board;
-    private final int[] scores;
-    private final int moveNumber;
+    private final int scoresFirstPlayer;
+    private final int scoresSecondPlayer;
 
     /**
      * Creates the initial empty game state.
      */
     public GameState() {
-        this(new Board(), new int[] {0, 0}, 0);
+        this(new Board(), 0, 0);
     }
 
-    private GameState(Board board, int[] scores, int moveNumber) {
+    private GameState(Board board, int scoresFirstPlayer, int scoresSecondPlayer) {
         this.board = board;
-        this.scores = scores;
-        this.moveNumber = moveNumber;
+        this.scoresFirstPlayer = scoresFirstPlayer;
+        this.scoresSecondPlayer = scoresSecondPlayer;
     }
 
     /**
@@ -31,27 +32,18 @@ public final class GameState {
     }
 
     /**
-     * Returns the score of the specified player (0 for the first player, 1 for the second).
+     * Returns the score of the specified player.
+     * @param firstPlayer true for the first player, false for the second.
      */
-    public int getScore(int player) {
-        if (player < 0 || player > 1) {
-            throw new IllegalArgumentException("Player index must be 0 or 1: " + player);
-        }
-        return scores[player];
+    public int getScore(boolean firstPlayer) {
+        return firstPlayer ? scoresFirstPlayer : scoresSecondPlayer;
     }
 
     /**
      * Returns the move number starting from zero.
      */
     public int getMoveNumber() {
-        return moveNumber;
-    }
-
-    /**
-     * Returns the index of the player that has to make the next move (0 or 1).
-     */
-    public int getCurrentPlayer() {
-        return moveNumber % 2;
+        return board.countBits();
     }
 
     /**
@@ -68,11 +60,14 @@ public final class GameState {
         if (!board.isEmpty(cellIndex)) {
             throw new IllegalArgumentException("Cell " + cellIndex + " is already occupied");
         }
+
         Board updatedBoard = board.withCell(cellIndex);
-        int player = getCurrentPlayer();
         int delta = ScoreCalculator.calculateScoreDelta(board.getBits(), updatedBoard.getBits(), cellIndex);
-        int[] updatedScores = new int[] {scores[0], scores[1]};
-        updatedScores[player] += delta;
-        return new GameState(updatedBoard, updatedScores, moveNumber + 1);
+
+        boolean firstPlayerTurn = board.isFirstPlayer();  // assume true = first player
+        int newScore1 = scoresFirstPlayer + (firstPlayerTurn ? delta : 0);
+        int newScore2 = scoresSecondPlayer + (firstPlayerTurn ? 0 : delta);
+
+        return new GameState(updatedBoard, newScore1, newScore2);
     }
 }

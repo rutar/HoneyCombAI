@@ -1,13 +1,17 @@
-plugins {
-    `java-library`
-    application
+plugins { java }
+
+java {
+    toolchain { languageVersion.set(JavaLanguageVersion.of(25)) }
 }
+
+repositories { mavenCentral() }
 
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.10.1"))
+    testImplementation(platform("org.junit:junit-bom:5.11.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-application {
-    mainClass = "com.honeycomb.core.HoneycombCLI"
+tasks.test {
+    useJUnitPlatform()
 }

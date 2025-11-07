@@ -11,8 +11,8 @@ class GameStateTest {
     void firstMoveScoresSingleCellLine() {
         GameState state = new GameState();
         state = state.applyMove(0);
-        assertEquals(1, state.getScore(0));
-        assertEquals(0, state.getScore(1));
+        assertEquals(1, state.getScore(true));
+        assertEquals(0, state.getScore(false));
         assertEquals(1, state.getMoveNumber());
     }
 
@@ -22,8 +22,8 @@ class GameStateTest {
         state = state.applyMove(1); // Player 1
         state = state.applyMove(3); // Player 2, elsewhere
         state = state.applyMove(2); // Player 1 completes row 1
-        assertEquals(2, state.getScore(0));
-        assertEquals(0, state.getScore(1));
+        assertEquals(2, state.getScore(true));
+        assertEquals(0, state.getScore(false));
     }
 
     @Test
@@ -34,6 +34,6 @@ class GameStateTest {
         }
         assertTrue(state.isGameOver());
         assertEquals(Board.CELL_COUNT, state.getMoveNumber());
-        assertEquals(165, state.getScore(0) + state.getScore(1));
+        assertEquals(165, state.getScore(true) + state.getScore(false));
     }
 }

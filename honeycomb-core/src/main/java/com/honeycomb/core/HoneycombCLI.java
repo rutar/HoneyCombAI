@@ -17,9 +17,8 @@ public final class HoneycombCLI {
         System.out.println("Honeycomb — console edition");
         while (!state.isGameOver()) {
             printBoard(state);
-            System.out.printf("Scores — Player 1: %d, Player 2: %d%n", state.getScore(0), state.getScore(1));
-            int player = state.getCurrentPlayer();
-            System.out.printf("Player %d, choose a cell (0-54): ", player + 1);
+            System.out.printf("Scores — Player 1: %d, Player 2: %d%n", state.getScore(true), state.getScore(false));
+            System.out.printf("Player %d, choose a cell (0-54): ", (state.getBoard().isFirstPlayer() ? 1 : 0) + 1);
 
             String input = scanner.nextLine().trim();
             int cellIndex;
@@ -43,8 +42,8 @@ public final class HoneycombCLI {
         }
 
         printBoard(state);
-        System.out.printf("Final scores — Player 1: %d, Player 2: %d%n", state.getScore(0), state.getScore(1));
-        System.out.printf("Winner: Player %d%n", state.getScore(0) > state.getScore(1) ? 1 : 2);
+        System.out.printf("Final scores — Player 1: %d, Player 2: %d%n", state.getScore(true), state.getScore(false));
+        System.out.printf("Winner: Player %d%n", state.getScore(true) > state.getScore(false) ? 1 : 2);
     }
 
     private static void printBoard(GameState state) {
