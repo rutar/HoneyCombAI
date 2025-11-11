@@ -47,7 +47,8 @@ class GameStateTest {
         state = state.applyMove(0);
         long canonical = state.getCanonicalBoard();
 
-        long symmetricMoveIndex = Symmetry.PERMUTATIONS[1][0];
+        int symmetricMoveIndex = Symmetry.PERMUTATIONS[1][0];
+
         GameState symmetricState = new GameState().applyMove(symmetricMoveIndex);
 
         assertEquals(canonical, symmetricState.getCanonicalBoard());
