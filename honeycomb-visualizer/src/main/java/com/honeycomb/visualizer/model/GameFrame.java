@@ -12,10 +12,6 @@ public record GameFrame(
         int lastMove,
         long firstPlayerBits,
         long secondPlayerBits,
-
-        long firstPlayerLines,
-        long secondPlayerLines,
-
         long visitedNodes,
         boolean timedOut,
         TranspositionTable.UpdateEvent tableEvent,
@@ -29,9 +25,7 @@ public record GameFrame(
     public static GameFrame initial(GameState state, TranspositionTable table) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(table, "table");
-
-        return new GameFrame(state, -1, 0L, 0L, 0L, 0L, 0L, false, table.getLastUpdate(), table.size(), state.getMoveNumber());
-
+        return new GameFrame(state, -1, 0L, 0L, 0L, false, table.getLastUpdate(), table.size(), state.getMoveNumber());
     }
 
     public boolean hasLastMove() {
