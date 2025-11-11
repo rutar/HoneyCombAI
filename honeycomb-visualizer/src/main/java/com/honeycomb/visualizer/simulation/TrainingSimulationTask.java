@@ -2,6 +2,7 @@ package com.honeycomb.visualizer.simulation;
 
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
+import com.honeycomb.core.ScoreCalculator;
 import com.honeycomb.core.ai.NegamaxAI;
 import com.honeycomb.core.ai.TranspositionTable;
 import com.honeycomb.visualizer.model.GameFrame;
@@ -18,6 +19,8 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
     private final NegamaxAI ai;
     private final TranspositionTable table;
     private final int depthLimit;
+
+    private static final long[] LINE_MASKS = ScoreCalculator.getLineMasks();
 
     public TrainingSimulationTask(NegamaxAI ai, TranspositionTable table, int depthLimit) {
         this.ai = Objects.requireNonNull(ai, "ai");
@@ -37,6 +40,8 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
         GameState state = new GameState();
         long firstBits = 0L;
         long secondBits = 0L;
+        long firstLines = 0L;
+        long secondLines = 0L;
         frames.add(GameFrame.initial(state, table));
 
         while (!state.isGameOver()) {
@@ -58,12 +63,29 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                 secondBits |= (1L << move);
             }
 
+
+            int[] candidateLines = ScoreCalculator.getLinesForCell(move);
+            for (int lineIndex : candidateLines) {
+                long mask = LINE_MASKS[lineIndex];
+                if (firstToMove) {
+                    if ((firstBits & mask) == mask) {
+                        firstLines |= (1L << lineIndex);
+                    }
+                } else if ((secondBits & mask) == mask) {
+                    secondLines |= (1L << lineIndex);
+                }
+            }
+
+
             state = state.applyMove(move);
             frames.add(new GameFrame(
                     state,
                     move,
                     firstBits,
                     secondBits,
+                    firstLines,
+                    secondLines,
+
                     ai.getLastVisitedNodeCount(),
                     ai.wasLastSearchTimedOut(),
                     table.getLastUpdate(),
