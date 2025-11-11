@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -24,6 +25,7 @@ public final class TranspositionTable {
 
     private final ConcurrentHashMap<Long, TTEntry> entries = new ConcurrentHashMap<>();
     private final Path storagePath;
+    private volatile UpdateEvent lastUpdate;
 
     public TranspositionTable() {
         this(DEFAULT_PATH);
@@ -38,15 +40,40 @@ public final class TranspositionTable {
     }
 
     public void put(long key, TTEntry entry) {
-        entries.merge(key, entry, (existing, replacement) -> existing.depth() >= replacement.depth() ? existing : replacement);
+        Objects.requireNonNull(entry, "entry");
+        PutContext context = new PutContext();
+        entries.compute(key, (ignored, existing) -> {
+            if (existing == null) {
+                context.previous = null;
+                context.stored = entry;
+                context.replaced = true;
+                return entry;
+            }
+            if (existing.depth() >= entry.depth()) {
+                context.previous = existing;
+                context.stored = existing;
+                context.replaced = false;
+                return existing;
+            }
+            context.previous = existing;
+            context.stored = entry;
+            context.replaced = true;
+            return entry;
+        });
+        lastUpdate = new UpdateEvent(key, context.stored, context.previous, context.replaced, size());
     }
 
     public void clear() {
         entries.clear();
+        lastUpdate = null;
     }
 
     public int size() {
         return entries.size();
+    }
+
+    public UpdateEvent getLastUpdate() {
+        return lastUpdate;
     }
 
     public void loadFromDisk() {
@@ -66,6 +93,7 @@ public final class TranspositionTable {
         }
         try (DataInputStream input = new DataInputStream(new BufferedInputStream(Files.newInputStream(path)))) {
             entries.clear();
+            lastUpdate = null;
             int count = input.readInt();
             for (int i = 0; i < count; i++) {
                 long key = input.readLong();
@@ -109,5 +137,15 @@ public final class TranspositionTable {
         } catch (IOException ex) {
             LOGGER.log(Level.WARNING, "Failed to save transposition table to " + path, ex);
         }
+    }
+
+    public record UpdateEvent(long key, TTEntry entry, TTEntry previousEntry, boolean replaced, int sizeAfterUpdate) {
+    }
+
+    private static final class PutContext {
+
+        private TTEntry stored;
+        private TTEntry previous;
+        private boolean replaced;
     }
 }

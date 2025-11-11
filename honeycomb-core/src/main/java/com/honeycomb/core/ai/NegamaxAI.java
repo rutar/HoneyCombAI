@@ -29,7 +29,7 @@ public final class NegamaxAI {
         this(maxDepth, timeLimit, new TranspositionTable());
     }
 
-    NegamaxAI(int maxDepth, Duration timeLimit, TranspositionTable table) {
+    public NegamaxAI(int maxDepth, Duration timeLimit, TranspositionTable table) {
         if (maxDepth < 1) {
             throw new IllegalArgumentException("Depth must be at least 1");
         }
