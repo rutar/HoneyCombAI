@@ -40,4 +40,19 @@ class NegamaxAITest {
         assertTrue(move >= 0 && move < Board.CELL_COUNT, "AI must return a legal move even on timeout");
         assertTrue(ai.wasLastSearchTimedOut(), "Search should report the timeout condition");
     }
+
+    @Test
+    void reusesTranspositionTableBetweenSearches() {
+        NegamaxAI ai = new NegamaxAI(3, Duration.ofMillis(50));
+        GameState state = new GameState();
+
+        ai.findBestMove(state);
+        long firstRunNodes = ai.getLastVisitedNodeCount();
+
+        ai.findBestMove(state);
+        long secondRunNodes = ai.getLastVisitedNodeCount();
+
+        assertTrue(firstRunNodes > 0, "Search should visit at least one node");
+        assertTrue(secondRunNodes <= firstRunNodes, "Transposition table should avoid exploring additional nodes");
+    }
 }

@@ -3,6 +3,7 @@ package com.honeycomb.core.ai;
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
 import com.honeycomb.core.ScoreCalculator;
+import com.honeycomb.core.Symmetry;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.logging.Logger;
@@ -19,19 +20,28 @@ public final class NegamaxAI {
     private final int maxDepth;
     private final long timeLimitNanos;
     private final SearchStack stack;
+    private final TranspositionTable transpositionTable;
 
     private long lastVisitedNodes;
     private boolean lastTimedOut;
 
     public NegamaxAI(int maxDepth, Duration timeLimit) {
+        this(maxDepth, timeLimit, new TranspositionTable());
+    }
+
+    NegamaxAI(int maxDepth, Duration timeLimit, TranspositionTable table) {
         if (maxDepth < 1) {
             throw new IllegalArgumentException("Depth must be at least 1");
         }
         Objects.requireNonNull(timeLimit, "timeLimit");
+        Objects.requireNonNull(table, "table");
         this.maxDepth = maxDepth;
         long nanos = timeLimit.isZero() ? Long.MAX_VALUE : timeLimit.toNanos();
         this.timeLimitNanos = nanos <= 0L ? 1L : nanos;
         this.stack = new SearchStack();
+        this.transpositionTable = table;
+        this.transpositionTable.loadFromDisk();
+        Runtime.getRuntime().addShutdownHook(new Thread(table::saveToDisk));
     }
 
     public int findBestMove(GameState state) {
@@ -56,6 +66,7 @@ public final class NegamaxAI {
         int bestScore = Integer.MIN_VALUE;
         int alpha = Integer.MIN_VALUE / 2;
         int beta = Integer.MAX_VALUE / 2;
+        int rootAlpha = alpha;
 
         while (availableMoves != 0) {
             int move = Long.numberOfTrailingZeros(availableMoves);
@@ -90,10 +101,27 @@ public final class NegamaxAI {
             bestMove = Long.numberOfTrailingZeros(initialAvailable);
         }
 
+        if (!stack.hasTimedOut() && bestScore != Integer.MIN_VALUE) {
+            long key = computeKey(boardBits, stack.isFirstPlayerTurn());
+            TTFlag flag;
+            if (bestScore <= rootAlpha) {
+                flag = TTFlag.UPPER_BOUND;
+            } else if (bestScore >= beta) {
+                flag = TTFlag.LOWER_BOUND;
+            } else {
+                flag = TTFlag.EXACT;
+            }
+            transpositionTable.put(key, new TTEntry(bestScore, depthLimit, flag));
+        }
+
         lastVisitedNodes = stack.getVisitedNodes();
         lastTimedOut = stack.hasTimedOut();
         final int usedDepth = depthLimit;
         LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", lastVisitedNodes, usedDepth));
+
+        if (!stack.hasTimedOut() && remainingMoves <= 1) {
+            transpositionTable.saveToDisk();
+        }
         return bestMove;
     }
 
@@ -121,13 +149,42 @@ public final class NegamaxAI {
 
         stack.incrementVisited();
 
+        long key = computeKey(boardBits, stack.isFirstPlayerTurn());
+        int originalAlpha = alpha;
+        TTEntry cached = transpositionTable.get(key);
+        if (cached != null && cached.depth() >= depth) {
+            switch (cached.flag()) {
+                case EXACT:
+                    return cached.value();
+                case LOWER_BOUND:
+                    alpha = Math.max(alpha, cached.value());
+                    break;
+                case UPPER_BOUND:
+                    beta = Math.min(beta, cached.value());
+                    break;
+                default:
+                    break;
+            }
+            if (alpha >= beta) {
+                return cached.value();
+            }
+        }
+
         if (depth <= 0 || boardBits == FULL_BOARD_MASK) {
-            return stack.evaluateCurrent();
+            int evaluation = stack.evaluateCurrent();
+            if (!stack.hasTimedOut()) {
+                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
+            }
+            return evaluation;
         }
 
         long available = (~boardBits) & FULL_BOARD_MASK;
         if (available == 0) {
-            return stack.evaluateCurrent();
+            int evaluation = stack.evaluateCurrent();
+            if (!stack.hasTimedOut()) {
+                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
+            }
+            return evaluation;
         }
 
         int bestValue = Integer.MIN_VALUE;
@@ -157,7 +214,22 @@ public final class NegamaxAI {
         }
 
         if (bestValue == Integer.MIN_VALUE) {
-            return stack.evaluateCurrent();
+            int evaluation = stack.evaluateCurrent();
+            if (!stack.hasTimedOut()) {
+                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
+            }
+            return evaluation;
+        }
+        if (!stack.hasTimedOut()) {
+            TTFlag flag;
+            if (bestValue <= originalAlpha) {
+                flag = TTFlag.UPPER_BOUND;
+            } else if (bestValue >= beta) {
+                flag = TTFlag.LOWER_BOUND;
+            } else {
+                flag = TTFlag.EXACT;
+            }
+            transpositionTable.put(key, new TTEntry(bestValue, depth, flag));
         }
         return bestValue;
     }
@@ -236,6 +308,10 @@ public final class NegamaxAI {
             return timedOut || (deadline != Long.MAX_VALUE && System.nanoTime() >= deadline);
         }
 
+        boolean isFirstPlayerTurn() {
+            return firstToMove[ply];
+        }
+
         private int bestPotential(long board) {
             long available = (~board) & FULL_BOARD_MASK;
             int best = 0;
@@ -250,5 +326,11 @@ public final class NegamaxAI {
             }
             return best;
         }
+    }
+
+    private long computeKey(long boardBits, boolean firstPlayerTurn) {
+        long canonical = Symmetry.canonical(boardBits);
+        long turnBit = firstPlayerTurn ? 1L : 0L;
+        return (canonical << 1) | turnBit;
     }
 }
