@@ -1,6 +1,7 @@
 package com.honeycomb.core.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.honeycomb.core.Board;
@@ -54,5 +55,13 @@ class NegamaxAITest {
 
         assertTrue(firstRunNodes > 0, "Search should visit at least one node");
         assertTrue(secondRunNodes <= firstRunNodes, "Transposition table should avoid exploring additional nodes");
+    }
+
+    @Test
+    void enforcesDepthOverrideValidation() {
+        NegamaxAI ai = new NegamaxAI(4, Duration.ofMillis(10));
+        GameState state = new GameState();
+
+        assertThrows(IllegalArgumentException.class, () -> ai.findBestMove(state, 0));
     }
 }
