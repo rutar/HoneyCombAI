@@ -1,8 +1,11 @@
 package com.honeycomb.core.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -41,10 +44,36 @@ class TranspositionTableTest {
         loaded.loadFromDisk();
 
         assertEquals(2, loaded.size());
+        assertNull(loaded.getLastUpdate());
         TTEntry entry = loaded.get(21L);
         assertNotNull(entry);
         assertEquals(13, entry.value());
         assertEquals(2, entry.depth());
         assertSame(TTFlag.EXACT, entry.flag());
+    }
+
+    @Test
+    void exposesLastUpdateDetails() {
+        TranspositionTable table = new TranspositionTable(tempDir.resolve("updates.tt"));
+
+        table.put(5L, new TTEntry(3, 2, TTFlag.EXACT));
+
+        TranspositionTable.UpdateEvent first = table.getLastUpdate();
+        assertNotNull(first);
+        assertEquals(5L, first.key());
+        assertSame(TTFlag.EXACT, first.entry().flag());
+        assertNull(first.previousEntry());
+        assertTrue(first.replaced());
+        assertEquals(1, first.sizeAfterUpdate());
+
+        table.put(5L, new TTEntry(9, 1, TTFlag.LOWER_BOUND));
+
+        TranspositionTable.UpdateEvent second = table.getLastUpdate();
+        assertNotNull(second);
+        assertEquals(5L, second.key());
+        assertFalse(second.replaced(), "Entry should remain unchanged when depth is shallower");
+        assertSame(first.entry(), second.entry());
+        assertSame(first.entry(), second.previousEntry());
+        assertEquals(1, second.sizeAfterUpdate());
     }
 }
