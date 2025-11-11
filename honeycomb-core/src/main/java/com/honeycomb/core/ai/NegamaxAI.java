@@ -45,7 +45,15 @@ public final class NegamaxAI {
     }
 
     public int findBestMove(GameState state) {
+        return findBestMove(state, maxDepth);
+    }
+
+    public int findBestMove(GameState state, int depthLimit) {
         Objects.requireNonNull(state, "state");
+
+        if (depthLimit < 1) {
+            throw new IllegalArgumentException("Depth limit must be at least 1");
+        }
 
         if (state.isGameOver()) {
             throw new IllegalStateException("Cannot search moves in a terminal position");
@@ -60,7 +68,10 @@ public final class NegamaxAI {
         long availableMoves = (~boardBits) & FULL_BOARD_MASK;
         long initialAvailable = availableMoves;
         int remainingMoves = Board.CELL_COUNT - state.getBoard().countBits();
-        int depthLimit = Math.min(maxDepth, remainingMoves);
+        int boundedDepthLimit = Math.min(Math.min(maxDepth, depthLimit), remainingMoves);
+        if (boundedDepthLimit < 1) {
+            boundedDepthLimit = 1;
+        }
 
         int bestMove = -1;
         int bestScore = Integer.MIN_VALUE;
@@ -74,7 +85,7 @@ public final class NegamaxAI {
 
             long updatedBoard = boardBits | (1L << move);
             stack.push(move, boardBits, updatedBoard);
-            int score = -negamax(updatedBoard, depthLimit - 1, -beta, -alpha);
+            int score = -negamax(updatedBoard, boundedDepthLimit - 1, -beta, -alpha);
             stack.pop();
 
             if (score > bestScore) {
@@ -111,12 +122,12 @@ public final class NegamaxAI {
             } else {
                 flag = TTFlag.EXACT;
             }
-            transpositionTable.put(key, new TTEntry(bestScore, depthLimit, flag));
+            transpositionTable.put(key, new TTEntry(bestScore, boundedDepthLimit, flag));
         }
 
         lastVisitedNodes = stack.getVisitedNodes();
         lastTimedOut = stack.hasTimedOut();
-        final int usedDepth = depthLimit;
+        final int usedDepth = boundedDepthLimit;
         LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", lastVisitedNodes, usedDepth));
 
         if (!stack.hasTimedOut() && remainingMoves <= 1) {
