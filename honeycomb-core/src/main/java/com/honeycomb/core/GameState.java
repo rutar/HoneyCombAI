@@ -10,6 +10,7 @@ public final class GameState {
     private final Board board;
     private final int scoresFirstPlayer;
     private final int scoresSecondPlayer;
+    private final long canonicalBoard;
 
     /**
      * Creates the initial empty game state.
@@ -22,6 +23,7 @@ public final class GameState {
         this.board = board;
         this.scoresFirstPlayer = scoresFirstPlayer;
         this.scoresSecondPlayer = scoresSecondPlayer;
+        this.canonicalBoard = Symmetry.canonical(board.getBits());
     }
 
     /**
@@ -29,6 +31,14 @@ public final class GameState {
      */
     public Board getBoard() {
         return board;
+    }
+
+    /**
+     * Returns the canonical bitboard representation of the current state, which normalizes
+     * all symmetric positions to a single value.
+     */
+    public long getCanonicalBoard() {
+        return canonicalBoard;
     }
 
     /**
