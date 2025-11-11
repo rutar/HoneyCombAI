@@ -63,6 +63,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                 secondBits |= (1L << move);
             }
 
+
             int[] candidateLines = ScoreCalculator.getLinesForCell(move);
             for (int lineIndex : candidateLines) {
                 long mask = LINE_MASKS[lineIndex];
@@ -75,6 +76,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                 }
             }
 
+
             state = state.applyMove(move);
             frames.add(new GameFrame(
                     state,
@@ -83,6 +85,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                     secondBits,
                     firstLines,
                     secondLines,
+
                     ai.getLastVisitedNodeCount(),
                     ai.wasLastSearchTimedOut(),
                     table.getLastUpdate(),
