@@ -1,6 +1,7 @@
 package com.honeycomb.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ class GameStateTest {
         assertEquals(1, state.getScore(true));
         assertEquals(0, state.getScore(false));
         assertEquals(1, state.getMoveNumber());
+        assertNotEquals(0L, state.getCanonicalBoard());
     }
 
     @Test
@@ -35,5 +37,19 @@ class GameStateTest {
         assertTrue(state.isGameOver());
         assertEquals(Board.CELL_COUNT, state.getMoveNumber());
         assertEquals(165, state.getScore(true) + state.getScore(false));
+    }
+
+    @Test
+    void canonicalBoardReflectsSymmetricMoves() {
+        GameState state = new GameState();
+        assertEquals(0L, state.getCanonicalBoard());
+
+        state = state.applyMove(0);
+        long canonical = state.getCanonicalBoard();
+
+        long symmetricMoveIndex = Symmetry.PERMUTATIONS[1][0];
+        GameState symmetricState = new GameState().applyMove(symmetricMoveIndex);
+
+        assertEquals(canonical, symmetricState.getCanonicalBoard());
     }
 }
