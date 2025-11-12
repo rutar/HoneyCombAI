@@ -117,11 +117,34 @@ public final class VisualizerApp extends Application {
     }
 
     private void loadTranspositionTableAsync() {
-        transpositionTable.loadFromDiskAsync().exceptionally(ex -> {
-            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
-            LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", cause);
-            return null;
+        transpositionTable.loadFromDiskAsync().whenComplete((ignored, throwable) -> {
+            if (throwable != null) {
+                Throwable cause = throwable.getCause() == null ? throwable : throwable.getCause();
+                LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", cause);
+                return;
+            }
+            Platform.runLater(this::refreshCurrentFrameWithTableSize);
         });
+    }
+
+    private void refreshCurrentFrameWithTableSize() {
+        if (frames.isEmpty()) {
+            return;
+        }
+        int index = Math.max(0, Math.min(currentIndex.get(), frames.size() - 1));
+        GameFrame frame = frames.get(index);
+        GameFrame updated = new GameFrame(
+                frame.state(),
+                frame.lastMove(),
+                frame.firstPlayerBits(),
+                frame.secondPlayerBits(),
+                frame.visitedNodes(),
+                frame.timedOut(),
+                transpositionTable.getLastUpdate(),
+                transpositionTable.size(),
+                frame.ply());
+        frames.set(index, updated);
+        currentFrame.set(updated);
     }
 
     private void setupIndexListener() {
