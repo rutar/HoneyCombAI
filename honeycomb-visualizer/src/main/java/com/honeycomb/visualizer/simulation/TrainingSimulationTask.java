@@ -8,6 +8,8 @@ import com.honeycomb.visualizer.model.GameFrame;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
+import javafx.application.Platform;
 import javafx.concurrent.Task;
 
 /**
@@ -18,14 +20,17 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
     private final NegamaxAI ai;
     private final TranspositionTable table;
     private final int depthLimit;
+    private final Consumer<GameFrame> frameListener;
 
-    public TrainingSimulationTask(NegamaxAI ai, TranspositionTable table, int depthLimit) {
+    public TrainingSimulationTask(NegamaxAI ai, TranspositionTable table, int depthLimit,
+            Consumer<GameFrame> frameListener) {
         this.ai = Objects.requireNonNull(ai, "ai");
         this.table = Objects.requireNonNull(table, "table");
         if (depthLimit < 1) {
             throw new IllegalArgumentException("Depth limit must be at least 1");
         }
         this.depthLimit = depthLimit;
+        this.frameListener = Objects.requireNonNull(frameListener, "frameListener");
     }
 
     @Override
@@ -59,7 +64,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
             }
 
             state = state.applyMove(move);
-            frames.add(new GameFrame(
+            GameFrame frame = new GameFrame(
                     state,
                     move,
                     firstBits,
@@ -68,11 +73,22 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                     ai.wasLastSearchTimedOut(),
                     table.getLastUpdate(),
                     table.size(),
-                    state.getMoveNumber()));
+                    state.getMoveNumber());
+            frames.add(frame);
+            publishFrame(frame);
+            updateProgress(state.getMoveNumber(), Board.CELL_COUNT);
+            updateMessage(String.format("Ход %d найден", moveNumber));
         }
 
         updateProgress(Board.CELL_COUNT, Board.CELL_COUNT);
         updateMessage("Симуляция завершена");
         return frames;
+    }
+
+    private void publishFrame(GameFrame frame) {
+        if (frameListener == null) {
+            return;
+        }
+        Platform.runLater(() -> frameListener.accept(frame));
     }
 }

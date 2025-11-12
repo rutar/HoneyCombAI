@@ -243,7 +243,17 @@ public final class VisualizerApp extends Application {
     private void runSimulation(int depthLimit) {
         pausePlayback();
 
-        TrainingSimulationTask task = new TrainingSimulationTask(ai, transpositionTable, depthLimit);
+        GameFrame initialFrame = GameFrame.initial(new GameState(), transpositionTable);
+        frames.setAll(initialFrame);
+        currentIndex.set(0);
+        currentFrame.set(initialFrame);
+
+        TrainingSimulationTask task = new TrainingSimulationTask(ai, transpositionTable, depthLimit, frame -> {
+            frames.add(frame);
+            if (simulationRunning.get()) {
+                currentIndex.set(frames.size() - 1);
+            }
+        });
         simulationRunning.set(true);
         progressBar.progressProperty().bind(task.progressProperty());
         statusLabel.textProperty().bind(task.messageProperty());
