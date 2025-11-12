@@ -2,12 +2,15 @@ package com.honeycomb.core.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,5 +78,27 @@ class TranspositionTableTest {
         assertSame(first.entry(), second.entry());
         assertSame(first.entry(), second.previousEntry());
         assertEquals(1, second.sizeAfterUpdate());
+    }
+
+    @Test
+    void reportsPersistenceStatusUpdates() {
+        Path file = tempDir.resolve("status.tt");
+        TranspositionTable table = new TranspositionTable(file);
+
+        List<TranspositionTable.PersistenceStatus> statuses = new ArrayList<>();
+        table.addPersistenceListener(statuses::add);
+
+        table.loadFromDiskAsync().join();
+        assertEquals(TranspositionTable.PersistenceStatus.READY, table.getPersistenceStatus());
+
+        table.put(1L, new TTEntry(2, 1, TTFlag.EXACT));
+        table.saveToDiskAsync().join();
+        assertEquals(TranspositionTable.PersistenceStatus.READY, table.getPersistenceStatus());
+
+        assertIterableEquals(List.of(
+                TranspositionTable.PersistenceStatus.LOADING,
+                TranspositionTable.PersistenceStatus.READY,
+                TranspositionTable.PersistenceStatus.SAVING,
+                TranspositionTable.PersistenceStatus.READY), statuses);
     }
 }

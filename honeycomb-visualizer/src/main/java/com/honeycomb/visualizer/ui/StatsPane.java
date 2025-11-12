@@ -1,9 +1,15 @@
 package com.honeycomb.visualizer.ui;
 
+import com.honeycomb.core.ai.TranspositionTable;
 import com.honeycomb.visualizer.model.GameFrame;
+import javafx.beans.value.ObservableValue;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 /**
@@ -23,6 +29,9 @@ public final class StatsPane extends VBox {
     private final Label ttChangeValue = valueLabel();
     private final Label ttPreviousDepthValue = valueLabel();
     private final Label ttValueValue = valueLabel();
+    private final Label ttStatusIndicator = statusIndicator();
+    private final Label ttStatusText = statusTextLabel();
+    private final Tooltip ttStatusTooltip = new Tooltip("Транспозиционная таблица не загружена");
 
     public StatsPane() {
         setPadding(new Insets(16));
@@ -45,7 +54,10 @@ public final class StatsPane extends VBox {
         addRow(grid, 3, "Счет", scoreValue);
         addRow(grid, 4, "Посещено узлов", nodesValue);
         addRow(grid, 5, "Таймаут", timeoutValue);
-        addRow(grid, 6, "TT записи", ttSizeValue);
+        HBox ttRow = new HBox(6, ttStatusIndicator, ttStatusText, ttSizeValue);
+        ttRow.setAlignment(Pos.CENTER_LEFT);
+        ttStatusIndicator.setTooltip(ttStatusTooltip);
+        addRow(grid, 6, "TT записи", ttRow);
         addRow(grid, 7, "TT глубина", ttDepthValue);
         addRow(grid, 8, "TT предыдущая глубина", ttPreviousDepthValue);
         addRow(grid, 9, "TT оценка", ttValueValue);
@@ -101,16 +113,76 @@ public final class StatsPane extends VBox {
         }
     }
 
-    private static void addRow(GridPane grid, int row, String label, Label value) {
+    public void bindTableStatus(ObservableValue<TranspositionTable.PersistenceStatus> status) {
+        if (status == null) {
+            return;
+        }
+        updateStatusIndicator(status.getValue());
+        status.addListener((obs, oldValue, newValue) -> updateStatusIndicator(newValue));
+    }
+
+    private void updateStatusIndicator(TranspositionTable.PersistenceStatus status) {
+        TranspositionTable.PersistenceStatus value = status == null
+                ? TranspositionTable.PersistenceStatus.NOT_LOADED
+                : status;
+        String color;
+        String description;
+        String shortDescription;
+        switch (value) {
+            case READY -> {
+                color = "#5cb85c";
+                description = "Транспозиционная таблица загружена";
+                shortDescription = "загружена";
+            }
+            case LOADING, SAVING -> {
+                color = "#f0ad4e";
+                description = value == TranspositionTable.PersistenceStatus.LOADING
+                        ? "Транспозиционная таблица загружается"
+                        : "Транспозиционная таблица сохраняется";
+                shortDescription = value == TranspositionTable.PersistenceStatus.LOADING
+                        ? "загрузка"
+                        : "сохранение";
+            }
+            case NOT_LOADED -> {
+                color = "#d9534f";
+                description = "Транспозиционная таблица не загружена";
+                shortDescription = "не загружена";
+            }
+            default -> {
+                color = "#d9534f";
+                description = "Состояние таблицы неизвестно";
+                shortDescription = "неизвестно";
+            }
+        }
+        ttStatusIndicator.setStyle("-fx-font-size: 16px; -fx-text-fill: " + color + ";");
+        ttStatusIndicator.setAccessibleText(description);
+        ttStatusTooltip.setText(description);
+        ttStatusText.setText("(" + shortDescription + ")");
+    }
+
+    private static void addRow(GridPane grid, int row, String label, Node value) {
         Label caption = new Label(label + ":");
         caption.setStyle("-fx-text-fill: #4a4f64; -fx-font-weight: 600;");
-        value.setStyle("-fx-text-fill: #1f2333;");
         grid.addRow(row, caption, value);
     }
 
     private static Label valueLabel() {
         Label label = new Label("—");
-        label.setStyle("-fx-font-size: 14px;");
+        label.setStyle("-fx-font-size: 14px; -fx-text-fill: #1f2333;");
+        return label;
+    }
+
+    private static Label statusIndicator() {
+        Label label = new Label("\uD83D\uDCA1");
+        label.setStyle("-fx-font-size: 16px; -fx-text-fill: #d9534f;");
+        label.setFocusTraversable(false);
+        return label;
+    }
+
+    private static Label statusTextLabel() {
+        Label label = new Label("(не загружена)");
+        label.setStyle("-fx-font-size: 14px; -fx-text-fill: #4a4f64;");
+        label.setFocusTraversable(false);
         return label;
     }
 }
