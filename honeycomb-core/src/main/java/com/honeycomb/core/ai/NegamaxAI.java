@@ -6,6 +6,8 @@ import com.honeycomb.core.ScoreCalculator;
 import com.honeycomb.core.Symmetry;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -40,10 +42,19 @@ public final class NegamaxAI {
         this.timeLimitNanos = nanos <= 0L ? 1L : nanos;
         this.stack = new SearchStack();
         this.transpositionTable = table;
-        Thread loader = new Thread(table::loadFromDisk, "negamax-tt-loader");
-        loader.setDaemon(true);
-        loader.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(table::saveToDisk));
+        CompletableFuture<Void> loadFuture = table.loadFromDiskAsync();
+        loadFuture.whenComplete((ignored, error) -> {
+            if (error != null) {
+                LOGGER.log(Level.WARNING, "Failed to load transposition table", error);
+            }
+        });
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                table.saveToDisk();
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "Failed to save transposition table during shutdown", ex);
+            }
+        }));
     }
 
     public int findBestMove(GameState state) {
@@ -133,7 +144,11 @@ public final class NegamaxAI {
         LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", lastVisitedNodes, usedDepth));
 
         if (!stack.hasTimedOut() && remainingMoves <= 1) {
-            transpositionTable.saveToDisk();
+            transpositionTable.saveToDiskAsync().whenComplete((ignored, error) -> {
+                if (error != null) {
+                    LOGGER.log(Level.WARNING, "Failed to save transposition table", error);
+                }
+            });
         }
         return bestMove;
     }
