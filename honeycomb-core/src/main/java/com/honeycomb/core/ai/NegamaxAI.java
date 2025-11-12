@@ -2,8 +2,8 @@ package com.honeycomb.core.ai;
 
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
-import com.honeycomb.core.ScoreCalculator;
 import com.honeycomb.core.Symmetry;
+import com.honeycomb.core.ai.state.SearchState;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -18,18 +18,20 @@ public final class NegamaxAI implements Searcher {
 
     private static final Logger LOGGER = Logger.getLogger(NegamaxAI.class.getName());
     private static final int SCORE_WEIGHT = 100;
-    private static final long FULL_BOARD_MASK = -1L >>> (64 - Board.CELL_COUNT);
 
     private final int maxDepth;
     private final long configuredTimeLimitNanos;
     private final Duration configuredTimeLimit;
-    private final SearchStack stack;
+    private final SearchState searchState;
     private final TranspositionTable transpositionTable;
     private final long minThinkTimeNanos;
 
     private long lastVisitedNodes;
     private boolean lastTimedOut;
     private SearchConstraints.SearchMode mode = SearchConstraints.SearchMode.SEQ;
+    private long visitedNodes;
+    private boolean timedOut;
+    private long deadline;
 
     public NegamaxAI(int maxDepth, Duration timeLimit) {
         this(maxDepth, timeLimit, Duration.ZERO, new TranspositionTable());
@@ -62,7 +64,7 @@ public final class NegamaxAI implements Searcher {
             throw new IllegalArgumentException("Minimum think time cannot exceed the overall time limit");
         }
         this.minThinkTimeNanos = minNanos;
-        this.stack = new SearchStack();
+        this.searchState = new SearchState();
         this.transpositionTable = table;
         CompletableFuture<Void> loadFuture = null;
         if (table.getPersistenceStatus() == TranspositionTable.PersistenceStatus.NOT_LOADED) {
@@ -152,15 +154,14 @@ public final class NegamaxAI implements Searcher {
     }
 
     private SearchResult sequentialSearch(GameState state, int boundedDepthLimit, long timeLimitNanos) {
-        stack.reset(state);
+        searchState.reset(state);
+        visitedNodes = 0L;
+        timedOut = false;
         long searchStart = System.nanoTime();
         long now = searchStart;
-        long deadline = timeLimitNanos == Long.MAX_VALUE ? Long.MAX_VALUE : saturatingAdd(now, timeLimitNanos);
-        stack.setDeadline(deadline);
+        deadline = timeLimitNanos == Long.MAX_VALUE ? Long.MAX_VALUE : saturatingAdd(now, timeLimitNanos);
 
-        long boardBits = state.getBoard().getBits();
-        long availableMoves = (~boardBits) & FULL_BOARD_MASK;
-        long initialAvailable = availableMoves;
+        long boardBits = searchState.currentBoard();
         int remainingMoves = Board.CELL_COUNT - state.getBoard().countBits();
 
         int bestMove = -1;
@@ -169,21 +170,21 @@ public final class NegamaxAI implements Searcher {
         int beta = Integer.MAX_VALUE / 2;
         int rootAlpha = alpha;
 
-        while (availableMoves != 0) {
-            int move = Long.numberOfTrailingZeros(availableMoves);
-            availableMoves &= availableMoves - 1;
+        int rootDepth = searchState.ply();
+        int moveCount = searchState.generateMoves();
 
-            long updatedBoard = boardBits | (1L << move);
-            stack.push(move, boardBits, updatedBoard);
-            int score = -negamax(updatedBoard, boundedDepthLimit - 1, -beta, -alpha);
-            stack.pop();
+        for (int i = 0; i < moveCount; i++) {
+            int move = searchState.moveAt(rootDepth, i);
+            searchState.pushGenerated(rootDepth, i);
+            int score = -negamax(boundedDepthLimit - 1, -beta, -alpha);
+            searchState.pop();
 
             if (score > bestScore) {
                 bestScore = score;
                 bestMove = move;
             }
 
-            if (stack.hasTimedOut()) {
+            if (timedOut) {
                 break;
             }
 
@@ -196,14 +197,14 @@ public final class NegamaxAI implements Searcher {
         }
 
         if (bestMove < 0) {
-            if (initialAvailable == 0) {
+            if (moveCount == 0) {
                 throw new IllegalStateException("No legal moves available");
             }
-            bestMove = Long.numberOfTrailingZeros(initialAvailable);
+            bestMove = searchState.moveAt(rootDepth, 0);
         }
 
-        if (!stack.hasTimedOut() && bestScore != Integer.MIN_VALUE) {
-            long key = computeKey(boardBits, stack.isFirstPlayerTurn());
+        if (!timedOut && bestScore != Integer.MIN_VALUE) {
+            long key = computeKey(boardBits, searchState.isFirstPlayerTurn());
             TTFlag flag;
             if (bestScore <= rootAlpha) {
                 flag = TTFlag.UPPER_BOUND;
@@ -215,8 +216,8 @@ public final class NegamaxAI implements Searcher {
             transpositionTable.put(key, new TTEntry(bestScore, boundedDepthLimit, flag));
         }
 
-        long visitedNodes = stack.getVisitedNodes();
-        boolean timedOut = stack.hasTimedOut();
+        long visitedNodes = this.visitedNodes;
+        boolean timedOut = this.timedOut;
         final int usedDepth = boundedDepthLimit;
         LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", visitedNodes, usedDepth));
 
@@ -255,15 +256,16 @@ public final class NegamaxAI implements Searcher {
         LockSupport.parkNanos(remaining);
     }
 
-    private int negamax(long boardBits, int depth, int alpha, int beta) {
-        if (stack.isDeadlineExceeded()) {
-            stack.markTimedOut();
-            return stack.evaluateCurrent();
+    private int negamax(int depth, int alpha, int beta) {
+        if (isDeadlineExceeded()) {
+            timedOut = true;
+            return searchState.evaluateCurrent(SCORE_WEIGHT);
         }
 
-        stack.incrementVisited();
+        visitedNodes++;
 
-        long key = computeKey(boardBits, stack.isFirstPlayerTurn());
+        long boardBits = searchState.currentBoard();
+        long key = computeKey(boardBits, searchState.isFirstPlayerTurn());
         int originalAlpha = alpha;
         TTEntry cached = transpositionTable.get(key);
         if (cached != null && cached.depth() >= depth) {
@@ -284,18 +286,19 @@ public final class NegamaxAI implements Searcher {
             }
         }
 
-        if (depth <= 0 || boardBits == FULL_BOARD_MASK) {
-            int evaluation = stack.evaluateCurrent();
-            if (!stack.hasTimedOut()) {
+        if (depth <= 0 || searchState.isTerminal()) {
+            int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
+            if (!timedOut) {
                 transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
             }
             return evaluation;
         }
 
-        long available = (~boardBits) & FULL_BOARD_MASK;
-        if (available == 0) {
-            int evaluation = stack.evaluateCurrent();
-            if (!stack.hasTimedOut()) {
+        int currentPly = searchState.ply();
+        int moveCount = searchState.generateMoves();
+        if (moveCount == 0) {
+            int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
+            if (!timedOut) {
                 transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
             }
             return evaluation;
@@ -303,19 +306,15 @@ public final class NegamaxAI implements Searcher {
 
         int bestValue = Integer.MIN_VALUE;
 
-        while (available != 0) {
-            int move = Long.numberOfTrailingZeros(available);
-            available &= available - 1;
-
-            long updated = boardBits | (1L << move);
-            stack.push(move, boardBits, updated);
-            int score = -negamax(updated, depth - 1, -beta, -alpha);
-            stack.pop();
+        for (int i = 0; i < moveCount; i++) {
+            searchState.pushGenerated(currentPly, i);
+            int score = -negamax(depth - 1, -beta, -alpha);
+            searchState.pop();
 
             if (score > bestValue) {
                 bestValue = score;
             }
-            if (stack.hasTimedOut()) {
+            if (timedOut) {
                 return bestValue;
             }
 
@@ -328,13 +327,13 @@ public final class NegamaxAI implements Searcher {
         }
 
         if (bestValue == Integer.MIN_VALUE) {
-            int evaluation = stack.evaluateCurrent();
-            if (!stack.hasTimedOut()) {
+            int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
+            if (!timedOut) {
                 transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
             }
             return evaluation;
         }
-        if (!stack.hasTimedOut()) {
+        if (!timedOut) {
             TTFlag flag;
             if (bestValue <= originalAlpha) {
                 flag = TTFlag.UPPER_BOUND;
@@ -348,103 +347,13 @@ public final class NegamaxAI implements Searcher {
         return bestValue;
     }
 
-    private static final class SearchStack {
-
-        private final long[] boards = new long[Board.CELL_COUNT + 1];
-        private final boolean[] firstToMove = new boolean[Board.CELL_COUNT + 1];
-        private final int[] firstScores = new int[Board.CELL_COUNT + 1];
-        private final int[] secondScores = new int[Board.CELL_COUNT + 1];
-
-        private int ply;
-        private long visitedNodes;
-        private boolean timedOut;
-        private long deadline;
-
-        void reset(GameState state) {
-            ply = 0;
-            boards[0] = state.getBoard().getBits();
-            firstToMove[0] = state.getBoard().isFirstPlayer();
-            firstScores[0] = state.getScore(true);
-            secondScores[0] = state.getScore(false);
-            visitedNodes = 0L;
-            timedOut = false;
-        }
-
-        void setDeadline(long deadline) {
-            this.deadline = deadline;
-        }
-
-        void push(int move, long previousBoard, long updatedBoard) {
-            boolean isFirst = firstToMove[ply];
-            int delta = ScoreCalculator.calculateScoreDelta(previousBoard, updatedBoard, move);
-
-            int newFirstScore = firstScores[ply] + (isFirst ? delta : 0);
-            int newSecondScore = secondScores[ply] + (isFirst ? 0 : delta);
-
-            ply++;
-            boards[ply] = updatedBoard;
-            firstToMove[ply] = !isFirst;
-            firstScores[ply] = newFirstScore;
-            secondScores[ply] = newSecondScore;
-        }
-
-        void pop() {
-            if (ply == 0) {
-                throw new IllegalStateException("Cannot pop root state");
-            }
-            ply--;
-        }
-
-        int evaluateCurrent() {
-            boolean firstPlayerTurn = firstToMove[ply];
-            int diff = firstScores[ply] - secondScores[ply];
-            int perspective = firstPlayerTurn ? diff : -diff;
-            return perspective * SCORE_WEIGHT + bestPotential(boards[ply]);
-        }
-
-        void incrementVisited() {
-            visitedNodes++;
-        }
-
-        long getVisitedNodes() {
-            return visitedNodes;
-        }
-
-        boolean hasTimedOut() {
-            return timedOut;
-        }
-
-        void markTimedOut() {
-            timedOut = true;
-        }
-
-        boolean isDeadlineExceeded() {
-            return timedOut || (deadline != Long.MAX_VALUE && System.nanoTime() >= deadline);
-        }
-
-        boolean isFirstPlayerTurn() {
-            return firstToMove[ply];
-        }
-
-        private int bestPotential(long board) {
-            long available = (~board) & FULL_BOARD_MASK;
-            int best = 0;
-            while (available != 0) {
-                int move = Long.numberOfTrailingZeros(available);
-                available &= available - 1;
-                long updated = board | (1L << move);
-                int delta = ScoreCalculator.calculateScoreDelta(board, updated, move);
-                if (delta > best) {
-                    best = delta;
-                }
-            }
-            return best;
-        }
-    }
-
     private long computeKey(long boardBits, boolean firstPlayerTurn) {
         long canonical = Symmetry.canonical(boardBits);
         long turnBit = firstPlayerTurn ? 1L : 0L;
         return (canonical << 1) | turnBit;
+    }
+
+    private boolean isDeadlineExceeded() {
+        return timedOut || (deadline != Long.MAX_VALUE && System.nanoTime() >= deadline);
     }
 }
