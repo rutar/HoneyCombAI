@@ -79,4 +79,16 @@ class NegamaxAITest {
         assertTrue(elapsedMillis >= minThinkTime.toMillis(),
                 "Search should respect the configured minimum think time");
     }
+
+    @Test
+    void fallsBackToSequentialModeWhenParallelRequested() {
+        NegamaxAI ai = new NegamaxAI(2, Duration.ofMillis(10));
+        GameState state = new GameState();
+
+        SearchConstraints constraints = new SearchConstraints(2, Duration.ofMillis(10), SearchConstraints.SearchMode.PAR);
+        SearchResult result = ai.search(state, constraints);
+
+        assertTrue(result.move() >= 0 && result.move() < Board.CELL_COUNT,
+                "Search should return a legal move when parallel mode is requested");
+    }
 }

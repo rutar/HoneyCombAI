@@ -14,20 +14,22 @@ import java.util.logging.Logger;
 /**
  * Negamax searcher with depth and time controls.
  */
-public final class NegamaxAI {
+public final class NegamaxAI implements Searcher {
 
     private static final Logger LOGGER = Logger.getLogger(NegamaxAI.class.getName());
     private static final int SCORE_WEIGHT = 100;
     private static final long FULL_BOARD_MASK = -1L >>> (64 - Board.CELL_COUNT);
 
     private final int maxDepth;
-    private final long timeLimitNanos;
+    private final long configuredTimeLimitNanos;
+    private final Duration configuredTimeLimit;
     private final SearchStack stack;
     private final TranspositionTable transpositionTable;
     private final long minThinkTimeNanos;
 
     private long lastVisitedNodes;
     private boolean lastTimedOut;
+    private SearchConstraints.SearchMode mode = SearchConstraints.SearchMode.SEQ;
 
     public NegamaxAI(int maxDepth, Duration timeLimit) {
         this(maxDepth, timeLimit, Duration.ZERO, new TranspositionTable());
@@ -50,12 +52,13 @@ public final class NegamaxAI {
         Objects.requireNonNull(table, "table");
         this.maxDepth = maxDepth;
         long nanos = timeLimit.isZero() ? Long.MAX_VALUE : timeLimit.toNanos();
-        this.timeLimitNanos = nanos <= 0L ? 1L : nanos;
+        this.configuredTimeLimitNanos = nanos <= 0L ? 1L : nanos;
+        this.configuredTimeLimit = timeLimit.isZero() ? Duration.ZERO : timeLimit;
         long minNanos = minThinkTime.isZero() ? 0L : minThinkTime.toNanos();
         if (minNanos < 0L) {
             throw new IllegalArgumentException("Minimum think time must be non-negative");
         }
-        if (minNanos > timeLimitNanos) {
+        if (minNanos > configuredTimeLimitNanos) {
             throw new IllegalArgumentException("Minimum think time cannot exceed the overall time limit");
         }
         this.minThinkTimeNanos = minNanos;
@@ -81,6 +84,14 @@ public final class NegamaxAI {
         }));
     }
 
+    public SearchConstraints.SearchMode getMode() {
+        return mode;
+    }
+
+    public void setMode(SearchConstraints.SearchMode mode) {
+        this.mode = Objects.requireNonNull(mode, "mode");
+    }
+
     public int findBestMove(GameState state) {
         return findBestMove(state, maxDepth);
     }
@@ -92,10 +103,55 @@ public final class NegamaxAI {
             throw new IllegalArgumentException("Depth limit must be at least 1");
         }
 
+        SearchConstraints constraints = new SearchConstraints(depthLimit, configuredTimeLimit, mode);
+        SearchResult result = search(state, constraints);
+        return result.move();
+    }
+
+    public long getLastVisitedNodeCount() {
+        return lastVisitedNodes;
+    }
+
+    public boolean wasLastSearchTimedOut() {
+        return lastTimedOut;
+    }
+
+    @Override
+    public SearchResult search(GameState state, SearchConstraints constraints) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(constraints, "constraints");
+
         if (state.isGameOver()) {
             throw new IllegalStateException("Cannot search moves in a terminal position");
         }
 
+        int requestedDepth = constraints.depthLimit();
+        int boundedDepth = Math.min(maxDepth, requestedDepth);
+        int remainingMoves = Board.CELL_COUNT - state.getBoard().countBits();
+        boundedDepth = Math.max(1, Math.min(boundedDepth, remainingMoves));
+
+        long timeLimitNanos = toTimeLimitNanos(constraints.timeLimit());
+
+        SearchConstraints.SearchMode requestedMode = constraints.mode();
+        SearchResult result;
+        if (requestedMode == SearchConstraints.SearchMode.SEQ) {
+            result = sequentialSearch(state, boundedDepth, timeLimitNanos);
+        } else {
+            LOGGER.warning(() -> String.format("Mode %s is not yet implemented; falling back to SEQ", requestedMode));
+            result = sequentialSearch(state, boundedDepth, timeLimitNanos);
+        }
+
+        lastVisitedNodes = result.visitedNodes();
+        lastTimedOut = result.timedOut();
+        return result;
+    }
+
+    private long toTimeLimitNanos(Duration timeLimit) {
+        long nanos = timeLimit.isZero() ? Long.MAX_VALUE : timeLimit.toNanos();
+        return nanos <= 0L ? 1L : nanos;
+    }
+
+    private SearchResult sequentialSearch(GameState state, int boundedDepthLimit, long timeLimitNanos) {
         stack.reset(state);
         long searchStart = System.nanoTime();
         long now = searchStart;
@@ -106,10 +162,6 @@ public final class NegamaxAI {
         long availableMoves = (~boardBits) & FULL_BOARD_MASK;
         long initialAvailable = availableMoves;
         int remainingMoves = Board.CELL_COUNT - state.getBoard().countBits();
-        int boundedDepthLimit = Math.min(Math.min(maxDepth, depthLimit), remainingMoves);
-        if (boundedDepthLimit < 1) {
-            boundedDepthLimit = 1;
-        }
 
         int bestMove = -1;
         int bestScore = Integer.MIN_VALUE;
@@ -163,31 +215,24 @@ public final class NegamaxAI {
             transpositionTable.put(key, new TTEntry(bestScore, boundedDepthLimit, flag));
         }
 
-        lastVisitedNodes = stack.getVisitedNodes();
-        lastTimedOut = stack.hasTimedOut();
+        long visitedNodes = stack.getVisitedNodes();
+        boolean timedOut = stack.hasTimedOut();
         final int usedDepth = boundedDepthLimit;
-        LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", lastVisitedNodes, usedDepth));
+        LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", visitedNodes, usedDepth));
 
-        if (!stack.hasTimedOut()) {
+        if (!timedOut) {
             enforceMinimumThinkTime(searchStart);
         }
 
-        if (!stack.hasTimedOut() && remainingMoves <= 1) {
+        if (!timedOut && remainingMoves <= 1) {
             transpositionTable.saveToDiskAsync().whenComplete((ignored, error) -> {
                 if (error != null) {
                     LOGGER.log(Level.WARNING, "Failed to save transposition table", error);
                 }
             });
         }
-        return bestMove;
-    }
 
-    public long getLastVisitedNodeCount() {
-        return lastVisitedNodes;
-    }
-
-    public boolean wasLastSearchTimedOut() {
-        return lastTimedOut;
+        return new SearchResult(bestMove, usedDepth, visitedNodes, timedOut);
     }
 
     private long saturatingAdd(long a, long b) {
