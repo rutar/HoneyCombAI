@@ -68,10 +68,11 @@ public final class VisualizerApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        this.transpositionTable = loadTranspositionTable();
+        this.transpositionTable = new TranspositionTable();
         this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, transpositionTable);
         tableStatus.set(transpositionTable.getPersistenceStatus());
         transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
+        loadTranspositionTableAsync();
 
         boardView = new BoardView();
         statsPane = new StatsPane();
@@ -109,15 +110,35 @@ public final class VisualizerApp extends Application {
         stage.show();
     }
 
-    private TranspositionTable loadTranspositionTable() {
-        TranspositionTable table = new TranspositionTable();
-        try {
-            table.loadFromDisk();
-        } catch (RuntimeException ex) {
-            LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", ex);
-            return new TranspositionTable();
+    private void loadTranspositionTableAsync() {
+        transpositionTable.loadFromDiskAsync().whenComplete((ignored, throwable) -> {
+            if (throwable != null) {
+                Throwable cause = throwable.getCause() == null ? throwable : throwable.getCause();
+                LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", cause);
+                return;
+            }
+            Platform.runLater(this::refreshCurrentFrameWithTableSize);
+        });
+    }
+
+    private void refreshCurrentFrameWithTableSize() {
+        if (frames.isEmpty()) {
+            return;
         }
-        return table;
+        int index = Math.max(0, Math.min(currentIndex.get(), frames.size() - 1));
+        GameFrame frame = frames.get(index);
+        GameFrame updated = new GameFrame(
+                frame.state(),
+                frame.lastMove(),
+                frame.firstPlayerBits(),
+                frame.secondPlayerBits(),
+                frame.visitedNodes(),
+                frame.timedOut(),
+                transpositionTable.getLastUpdate(),
+                transpositionTable.size(),
+                frame.ply());
+        frames.set(index, updated);
+        currentFrame.set(updated);
     }
 
     private void setupIndexListener() {
