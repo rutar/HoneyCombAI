@@ -7,6 +7,7 @@ import com.honeycomb.core.Symmetry;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.locks.LockSupport;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -23,23 +24,41 @@ public final class NegamaxAI {
     private final long timeLimitNanos;
     private final SearchStack stack;
     private final TranspositionTable transpositionTable;
+    private final long minThinkTimeNanos;
 
     private long lastVisitedNodes;
     private boolean lastTimedOut;
 
     public NegamaxAI(int maxDepth, Duration timeLimit) {
-        this(maxDepth, timeLimit, new TranspositionTable());
+        this(maxDepth, timeLimit, Duration.ZERO, new TranspositionTable());
     }
 
     public NegamaxAI(int maxDepth, Duration timeLimit, TranspositionTable table) {
+        this(maxDepth, timeLimit, Duration.ZERO, table);
+    }
+
+    public NegamaxAI(int maxDepth, Duration timeLimit, Duration minThinkTime) {
+        this(maxDepth, timeLimit, minThinkTime, new TranspositionTable());
+    }
+
+    public NegamaxAI(int maxDepth, Duration timeLimit, Duration minThinkTime, TranspositionTable table) {
         if (maxDepth < 1) {
             throw new IllegalArgumentException("Depth must be at least 1");
         }
         Objects.requireNonNull(timeLimit, "timeLimit");
+        Objects.requireNonNull(minThinkTime, "minThinkTime");
         Objects.requireNonNull(table, "table");
         this.maxDepth = maxDepth;
         long nanos = timeLimit.isZero() ? Long.MAX_VALUE : timeLimit.toNanos();
         this.timeLimitNanos = nanos <= 0L ? 1L : nanos;
+        long minNanos = minThinkTime.isZero() ? 0L : minThinkTime.toNanos();
+        if (minNanos < 0L) {
+            throw new IllegalArgumentException("Minimum think time must be non-negative");
+        }
+        if (minNanos > timeLimitNanos) {
+            throw new IllegalArgumentException("Minimum think time cannot exceed the overall time limit");
+        }
+        this.minThinkTimeNanos = minNanos;
         this.stack = new SearchStack();
         this.transpositionTable = table;
         CompletableFuture<Void> loadFuture = null;
@@ -78,7 +97,8 @@ public final class NegamaxAI {
         }
 
         stack.reset(state);
-        long now = System.nanoTime();
+        long searchStart = System.nanoTime();
+        long now = searchStart;
         long deadline = timeLimitNanos == Long.MAX_VALUE ? Long.MAX_VALUE : saturatingAdd(now, timeLimitNanos);
         stack.setDeadline(deadline);
 
@@ -148,6 +168,10 @@ public final class NegamaxAI {
         final int usedDepth = boundedDepthLimit;
         LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", lastVisitedNodes, usedDepth));
 
+        if (!stack.hasTimedOut()) {
+            enforceMinimumThinkTime(searchStart);
+        }
+
         if (!stack.hasTimedOut() && remainingMoves <= 1) {
             transpositionTable.saveToDiskAsync().whenComplete((ignored, error) -> {
                 if (error != null) {
@@ -172,6 +196,18 @@ public final class NegamaxAI {
             return Long.MAX_VALUE;
         }
         return result;
+    }
+
+    private void enforceMinimumThinkTime(long searchStart) {
+        if (minThinkTimeNanos <= 0L) {
+            return;
+        }
+        long elapsed = System.nanoTime() - searchStart;
+        long remaining = minThinkTimeNanos - elapsed;
+        if (remaining <= 0L) {
+            return;
+        }
+        LockSupport.parkNanos(remaining);
     }
 
     private int negamax(long boardBits, int depth, int alpha, int beta) {

@@ -18,7 +18,7 @@ public final class TrainerRunner {
     }
 
     public static void main(String[] args) {
-        if (args.length < 3 || args.length > 5) {
+        if (args.length < 3 || args.length > 6) {
             printUsage();
             return;
         }
@@ -26,14 +26,43 @@ public final class TrainerRunner {
             int gameCount = Integer.parseInt(args[0]);
             int maxDepth = Integer.parseInt(args[1]);
             long timeLimitMillis = Long.parseLong(args[2]);
-            int scheduledDepth = args.length >= 4 ? Integer.parseInt(args[3]) : maxDepth;
-            Path tablePath = args.length == 5 ? Paths.get(args[4]) : null;
+            int scheduledDepth = maxDepth;
+            long minThinkMillis = 0L;
+            Path tablePath = null;
+
+            int index = 3;
+            if (index < args.length && !args[index].startsWith("--")) {
+                scheduledDepth = Integer.parseInt(args[index]);
+                index++;
+            }
+
+            while (index < args.length) {
+                String option = args[index];
+                if (option.startsWith("--minThinkMillis=")) {
+                    String value = option.substring("--minThinkMillis=".length());
+                    minThinkMillis = Long.parseLong(value);
+                } else if (option.startsWith("--table=")) {
+                    if (tablePath != null) {
+                        throw new IllegalArgumentException("Table path specified more than once");
+                    }
+                    tablePath = Paths.get(option.substring("--table=".length()));
+                } else if (tablePath == null) {
+                    tablePath = Paths.get(option);
+                } else {
+                    throw new IllegalArgumentException("Unrecognised argument: " + option);
+                }
+                index++;
+            }
+
+            if (minThinkMillis < 0L) {
+                throw new IllegalArgumentException("minThinkMillis must be non-negative");
+            }
 
             TranspositionTable table = tablePath == null ? new TranspositionTable() : new TranspositionTable(tablePath);
             table.loadFromDisk();
 
             Trainer trainer = new Trainer(table, maxDepth, Duration.ofMillis(timeLimitMillis),
-                    Trainer.DepthScheduler.constant(scheduledDepth));
+                    Duration.ofMillis(minThinkMillis), Trainer.DepthScheduler.constant(scheduledDepth));
             trainer.playGames(gameCount);
         } catch (NumberFormatException ex) {
             LOGGER.log(Level.SEVERE, "Failed to parse arguments", ex);
@@ -44,6 +73,8 @@ public final class TrainerRunner {
     }
 
     private static void printUsage() {
-        System.err.println("Usage: TrainerRunner <gameCount> <maxDepth> <timeLimitMillis> [depthOverride] [tablePath]");
+        System.err.println(
+                "Usage: TrainerRunner <gameCount> <maxDepth> <timeLimitMillis> [depthOverride] "
+                        + "[--minThinkMillis=<value>] [--table=<path>|tablePath]");
     }
 }

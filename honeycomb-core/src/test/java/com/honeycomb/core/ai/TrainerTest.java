@@ -14,7 +14,8 @@ class TrainerTest {
         Path tempDir = Files.createTempDirectory("trainer-test");
         Path tablePath = tempDir.resolve("tt.bin");
         TranspositionTable table = new TranspositionTable(tablePath);
-        Trainer trainer = new Trainer(table, 3, Duration.ofMillis(5), Trainer.DepthScheduler.constant(2));
+        Trainer trainer = new Trainer(table, 3, Duration.ofMillis(5), Duration.ofMillis(1),
+                Trainer.DepthScheduler.constant(2));
         try {
             trainer.playGames(1);
 

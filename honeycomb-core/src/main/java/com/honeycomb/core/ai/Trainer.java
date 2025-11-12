@@ -24,12 +24,22 @@ public final class Trainer {
     private long cumulativeScoreDelta;
 
     public Trainer(int maxDepth, Duration timeLimit) {
-        this(new TranspositionTable(), maxDepth, timeLimit, DepthScheduler.constant(maxDepth));
+        this(new TranspositionTable(), maxDepth, timeLimit, Duration.ZERO, DepthScheduler.constant(maxDepth));
+    }
+
+    public Trainer(int maxDepth, Duration timeLimit, Duration minThinkTime) {
+        this(new TranspositionTable(), maxDepth, timeLimit, minThinkTime, DepthScheduler.constant(maxDepth));
     }
 
     public Trainer(TranspositionTable transpositionTable, int maxDepth, Duration timeLimit, DepthScheduler depthScheduler) {
+        this(transpositionTable, maxDepth, timeLimit, Duration.ZERO, depthScheduler);
+    }
+
+    public Trainer(TranspositionTable transpositionTable, int maxDepth, Duration timeLimit,
+            Duration minThinkTime, DepthScheduler depthScheduler) {
         Objects.requireNonNull(transpositionTable, "transpositionTable");
         Objects.requireNonNull(timeLimit, "timeLimit");
+        Objects.requireNonNull(minThinkTime, "minThinkTime");
         Objects.requireNonNull(depthScheduler, "depthScheduler");
         if (maxDepth < 1) {
             throw new IllegalArgumentException("Maximum depth must be at least 1");
@@ -37,7 +47,7 @@ public final class Trainer {
         this.transpositionTable = transpositionTable;
         this.depthScheduler = depthScheduler;
         this.maxDepth = maxDepth;
-        this.ai = new NegamaxAI(maxDepth, timeLimit, transpositionTable);
+        this.ai = new NegamaxAI(maxDepth, timeLimit, minThinkTime, transpositionTable);
     }
 
     public void playGames(int gameCount) {
