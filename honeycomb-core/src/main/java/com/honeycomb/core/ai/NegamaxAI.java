@@ -42,12 +42,17 @@ public final class NegamaxAI {
         this.timeLimitNanos = nanos <= 0L ? 1L : nanos;
         this.stack = new SearchStack();
         this.transpositionTable = table;
-        CompletableFuture<Void> loadFuture = table.loadFromDiskAsync();
-        loadFuture.whenComplete((ignored, error) -> {
-            if (error != null) {
-                LOGGER.log(Level.WARNING, "Failed to load transposition table", error);
-            }
-        });
+        CompletableFuture<Void> loadFuture = null;
+        if (table.getPersistenceStatus() == TranspositionTable.PersistenceStatus.NOT_LOADED) {
+            loadFuture = table.loadFromDiskAsync();
+        }
+        if (loadFuture != null) {
+            loadFuture.whenComplete((ignored, error) -> {
+                if (error != null) {
+                    LOGGER.log(Level.WARNING, "Failed to load transposition table", error);
+                }
+            });
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 table.saveToDisk();
