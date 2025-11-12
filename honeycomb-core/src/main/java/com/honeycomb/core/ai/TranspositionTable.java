@@ -160,17 +160,38 @@ public final class TranspositionTable {
         if (!Files.exists(path)) {
             return;
         }
+        long fileSize;
+        try {
+            fileSize = Files.size(path);
+        } catch (IOException ex) {
+            LOGGER.log(Level.WARNING, "Failed to read transposition table size", ex);
+            throw new RuntimeException(ex);
+        }
+        long entrySizeV1 = Long.BYTES + Integer.BYTES + Integer.BYTES + 1;
+        long entrySizeV2 = entrySizeV1 + Integer.BYTES;
+
         try (DataInputStream input = new DataInputStream(new BufferedInputStream(Files.newInputStream(path)))) {
             entries.clear();
             lastUpdate = null;
             int count = input.readInt();
+            long expectedV1 = Integer.BYTES + (long) count * entrySizeV1;
+            long expectedV2 = Integer.BYTES + (long) count * entrySizeV2;
+            boolean hasBestMove = fileSize == expectedV2;
+            boolean warnedAboutSize = false;
             for (int i = 0; i < count; i++) {
                 long key = input.readLong();
                 int value = input.readInt();
                 int depth = input.readInt();
                 byte flagOrdinal = input.readByte();
                 TTFlag flag = TTFlag.values()[flagOrdinal];
-                entries.put(key, new TTEntry(value, depth, flag));
+                int bestMove = -1;
+                if (hasBestMove) {
+                    bestMove = input.readInt();
+                } else if (fileSize != expectedV1 && !warnedAboutSize) {
+                    LOGGER.log(Level.WARNING, "Unexpected transposition table size: {0} bytes", fileSize);
+                    warnedAboutSize = true;
+                }
+                entries.put(key, new TTEntry(value, depth, flag, bestMove));
             }
             LOGGER.info(() -> String.format("Loaded %d transposition entries from %s", count, path));
         } catch (IOException | RuntimeException ex) {
@@ -201,6 +222,7 @@ public final class TranspositionTable {
                 output.writeInt(value.value());
                 output.writeInt(value.depth());
                 output.writeByte(value.flag().ordinal());
+                output.writeInt(value.bestMove());
             }
             output.flush();
             LOGGER.info(() -> String.format("Saved %d transposition entries to %s", entries.size(), path));
