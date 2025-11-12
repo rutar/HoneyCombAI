@@ -43,7 +43,7 @@ public final class VisualizerApp extends Application {
     private static final int MAX_DEPTH = 6;
     private static final int DEFAULT_DEPTH = 3;
     private static final Duration TIME_LIMIT = Duration.ofMillis(2000);
-    private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(500);
+    private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(75);
     private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
     private final ObservableList<GameFrame> frames = FXCollections.observableArrayList();
     private final IntegerProperty currentIndex = new SimpleIntegerProperty(0);
@@ -159,7 +159,9 @@ public final class VisualizerApp extends Application {
     }
 
     private void setupPlaybackTimeline() {
-        playbackTimeline = new Timeline(new KeyFrame(javafx.util.Duration.millis(400), event -> advanceFrame()));
+        playbackTimeline = new Timeline(new KeyFrame(
+                javafx.util.Duration.millis(DEFAULT_MIN_THINK_TIME.toMillis()),
+                event -> advanceFrame()));
         playbackTimeline.setCycleCount(Timeline.INDEFINITE);
     }
 
