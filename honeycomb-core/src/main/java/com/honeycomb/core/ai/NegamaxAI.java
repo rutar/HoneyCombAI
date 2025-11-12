@@ -40,7 +40,9 @@ public final class NegamaxAI {
         this.timeLimitNanos = nanos <= 0L ? 1L : nanos;
         this.stack = new SearchStack();
         this.transpositionTable = table;
-        this.transpositionTable.loadFromDisk();
+        Thread loader = new Thread(table::loadFromDisk, "negamax-tt-loader");
+        loader.setDaemon(true);
+        loader.start();
         Runtime.getRuntime().addShutdownHook(new Thread(table::saveToDisk));
     }
 

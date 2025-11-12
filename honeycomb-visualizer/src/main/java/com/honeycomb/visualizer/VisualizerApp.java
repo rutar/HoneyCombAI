@@ -63,7 +63,6 @@ public final class VisualizerApp extends Application {
     @Override
     public void start(Stage stage) {
         this.transpositionTable = new TranspositionTable();
-        transpositionTable.loadFromDisk();
         this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, transpositionTable);
 
         boardView = new BoardView();
@@ -99,13 +98,6 @@ public final class VisualizerApp extends Application {
         stage.setMinWidth(960);
         stage.setMinHeight(720);
         stage.show();
-    }
-
-    @Override
-    public void stop() {
-        if (transpositionTable != null) {
-            transpositionTable.saveToDisk();
-        }
     }
 
     private void setupIndexListener() {
