@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class NegamaxAITest {
@@ -63,5 +64,19 @@ class NegamaxAITest {
         GameState state = new GameState();
 
         assertThrows(IllegalArgumentException.class, () -> ai.findBestMove(state, 0));
+    }
+
+    @Test
+    void enforcesMinimumThinkTime() {
+        Duration minThinkTime = Duration.ofMillis(20);
+        NegamaxAI ai = new NegamaxAI(2, Duration.ofMillis(100), minThinkTime);
+        GameState state = new GameState();
+
+        long start = System.nanoTime();
+        ai.findBestMove(state);
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertTrue(elapsedMillis >= minThinkTime.toMillis(),
+                "Search should respect the configured minimum think time");
     }
 }

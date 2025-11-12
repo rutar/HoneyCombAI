@@ -44,7 +44,7 @@ public final class VisualizerApp extends Application {
     private static final int MAX_DEPTH = 6;
     private static final int DEFAULT_DEPTH = 3;
     private static final Duration TIME_LIMIT = Duration.ofMillis(200);
-    private static final long MIN_ANIMATION_INTERVAL_NANOS = Duration.ofMillis(100).toNanos();
+    private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(0);
     private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
     private final ObservableList<GameFrame> frames = FXCollections.observableArrayList();
     private final IntegerProperty currentIndex = new SimpleIntegerProperty(0);
@@ -66,6 +66,7 @@ public final class VisualizerApp extends Application {
     private Spinner<Integer> depthSpinner;
     private ProgressBar progressBar;
     private Label statusLabel;
+    private Spinner<Integer> minThinkTimeSpinner;
 
     public static void main(String[] args) {
         launch(args);
@@ -74,7 +75,7 @@ public final class VisualizerApp extends Application {
     @Override
     public void start(Stage stage) {
         this.transpositionTable = new TranspositionTable();
-        this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, transpositionTable);
+        this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, DEFAULT_MIN_THINK_TIME, transpositionTable);
         tableStatus.set(transpositionTable.getPersistenceStatus());
         transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
         loadTranspositionTableAsync();
@@ -210,6 +211,12 @@ public final class VisualizerApp extends Application {
         depthSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(1, MAX_DEPTH, DEFAULT_DEPTH));
         depthSpinner.setPrefWidth(80);
 
+        minThinkTimeSpinner = new Spinner<>();
+        minThinkTimeSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(0, 5000,
+                (int) DEFAULT_MIN_THINK_TIME.toMillis(), 10));
+        minThinkTimeSpinner.setEditable(true);
+        minThinkTimeSpinner.setPrefWidth(100);
+
         progressBar = new ProgressBar(0);
         progressBar.setPrefWidth(180);
 
@@ -226,6 +233,8 @@ public final class VisualizerApp extends Application {
                 simulateButton,
                 new Label("Глубина:"),
                 depthSpinner,
+                new Label("Мин. время (мс):"),
+                minThinkTimeSpinner,
                 navigation,
                 spacer,
                 progressBar,
@@ -243,6 +252,7 @@ public final class VisualizerApp extends Application {
         pauseButton.disableProperty().bind(playing.not());
         simulateButton.disableProperty().bind(simulationRunning);
         depthSpinner.disableProperty().bind(simulationRunning);
+        minThinkTimeSpinner.disableProperty().bind(simulationRunning);
 
         return controls;
     }
@@ -291,6 +301,22 @@ public final class VisualizerApp extends Application {
 
     private void runSimulation(int depthLimit) {
         pausePlayback();
+
+        SpinnerValueFactory<Integer> minThinkFactory = minThinkTimeSpinner.getValueFactory();
+        if (minThinkFactory != null) {
+            try {
+                Integer parsed = minThinkFactory.getConverter().fromString(minThinkTimeSpinner.getEditor().getText());
+                if (parsed != null) {
+                    minThinkFactory.setValue(parsed);
+                }
+            } catch (NumberFormatException ignored) {
+                // Keep the previous value if parsing fails.
+            }
+        }
+
+        int minThinkMillis = minThinkTimeSpinner.getValue();
+        Duration minThinkTime = Duration.ofMillis(Math.max(0, minThinkMillis));
+        this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, minThinkTime, transpositionTable);
 
         GameFrame initialFrame = GameFrame.initial(new GameState(), transpositionTable);
         frames.setAll(initialFrame);
