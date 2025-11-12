@@ -218,6 +218,9 @@ public final class VisualizerApp extends Application {
         HBox navigation = new HBox(8, resetButton, previousButton, nextButton, playButton, pauseButton);
         navigation.setAlignment(Pos.CENTER_LEFT);
 
+        var tableReady = Bindings.createBooleanBinding(
+                () -> tableStatus.get() == TranspositionTable.PersistenceStatus.READY, tableStatus);
+
         HBox controls = new HBox(12,
                 simulateButton,
                 new Label("Глубина:"),
@@ -239,7 +242,7 @@ public final class VisualizerApp extends Application {
                 () -> frames.isEmpty() || currentIndex.get() == 0, currentIndex, frameCount));
         playButton.disableProperty().bind(playing.or(frameCount.lessThanOrEqualTo(1)).or(simulationRunning));
         pauseButton.disableProperty().bind(playing.not());
-        simulateButton.disableProperty().bind(simulationRunning);
+        simulateButton.disableProperty().bind(simulationRunning.or(tableReady.not()));
         depthSpinner.disableProperty().bind(simulationRunning);
         minThinkTimeSpinner.disableProperty().bind(simulationRunning);
 
@@ -289,6 +292,9 @@ public final class VisualizerApp extends Application {
     }
 
     private void runSimulation(int depthLimit) {
+        if (tableStatus.get() != TranspositionTable.PersistenceStatus.READY) {
+            return;
+        }
         pausePlayback();
 
         SpinnerValueFactory<Integer> minThinkFactory = minThinkTimeSpinner.getValueFactory();
