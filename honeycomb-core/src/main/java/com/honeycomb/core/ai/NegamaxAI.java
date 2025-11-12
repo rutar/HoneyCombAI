@@ -162,6 +162,9 @@ public final class NegamaxAI implements Searcher {
         deadline = timeLimitNanos == Long.MAX_VALUE ? Long.MAX_VALUE : saturatingAdd(now, timeLimitNanos);
 
         long boardBits = searchState.currentBoard();
+        long rootKey = computeKey(boardBits, searchState.isFirstPlayerTurn());
+        TTEntry rootCached = transpositionTable.get(rootKey);
+        int ttRootMove = rootCached != null ? rootCached.bestMove() : -1;
         int remainingMoves = Board.CELL_COUNT - state.getBoard().countBits();
 
         int bestMove = -1;
@@ -171,7 +174,7 @@ public final class NegamaxAI implements Searcher {
         int rootAlpha = alpha;
 
         int rootDepth = searchState.ply();
-        int moveCount = searchState.generateMoves();
+        int moveCount = searchState.generateMoves(ttRootMove);
 
         for (int i = 0; i < moveCount; i++) {
             int move = searchState.moveAt(rootDepth, i);
@@ -204,7 +207,6 @@ public final class NegamaxAI implements Searcher {
         }
 
         if (!timedOut && bestScore != Integer.MIN_VALUE) {
-            long key = computeKey(boardBits, searchState.isFirstPlayerTurn());
             TTFlag flag;
             if (bestScore <= rootAlpha) {
                 flag = TTFlag.UPPER_BOUND;
@@ -213,7 +215,7 @@ public final class NegamaxAI implements Searcher {
             } else {
                 flag = TTFlag.EXACT;
             }
-            transpositionTable.put(key, new TTEntry(bestScore, boundedDepthLimit, flag));
+            transpositionTable.put(rootKey, new TTEntry(bestScore, boundedDepthLimit, flag, bestMove));
         }
 
         long visitedNodes = this.visitedNodes;
@@ -267,7 +269,9 @@ public final class NegamaxAI implements Searcher {
         long boardBits = searchState.currentBoard();
         long key = computeKey(boardBits, searchState.isFirstPlayerTurn());
         int originalAlpha = alpha;
+        int originalBeta = beta;
         TTEntry cached = transpositionTable.get(key);
+        int ttBestMove = cached != null ? cached.bestMove() : -1;
         if (cached != null && cached.depth() >= depth) {
             switch (cached.flag()) {
                 case EXACT:
@@ -289,30 +293,49 @@ public final class NegamaxAI implements Searcher {
         if (depth <= 0 || searchState.isTerminal()) {
             int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
             if (!timedOut) {
-                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
+                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT, -1));
             }
             return evaluation;
         }
 
         int currentPly = searchState.ply();
-        int moveCount = searchState.generateMoves();
+        int moveCount = searchState.generateMoves(ttBestMove);
         if (moveCount == 0) {
             int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
             if (!timedOut) {
-                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
+                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT, -1));
             }
             return evaluation;
         }
 
         int bestValue = Integer.MIN_VALUE;
+        int bestMove = -1;
+        boolean isPvNode = (originalBeta - originalAlpha) > 1;
 
         for (int i = 0; i < moveCount; i++) {
+            int move = searchState.moveAt(currentPly, i);
+            boolean isCapture = searchState.moveDeltaAt(currentPly, i) > 0;
+            int reduction = 0;
+            if (!isPvNode && depth > 2 && i > 0 && !isCapture) {
+                reduction = 1;
+            }
+
             searchState.pushGenerated(currentPly, i);
-            int score = -negamax(depth - 1, -beta, -alpha);
+            int score;
+            if (reduction > 0) {
+                int reducedDepth = Math.max(0, depth - 1 - reduction);
+                score = -negamax(reducedDepth, -alpha - 1, -alpha);
+                if (score > alpha) {
+                    score = -negamax(depth - 1, -beta, -alpha);
+                }
+            } else {
+                score = -negamax(depth - 1, -beta, -alpha);
+            }
             searchState.pop();
 
             if (score > bestValue) {
                 bestValue = score;
+                bestMove = move;
             }
             if (timedOut) {
                 return bestValue;
@@ -329,7 +352,7 @@ public final class NegamaxAI implements Searcher {
         if (bestValue == Integer.MIN_VALUE) {
             int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
             if (!timedOut) {
-                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT));
+                transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT, -1));
             }
             return evaluation;
         }
@@ -342,7 +365,7 @@ public final class NegamaxAI implements Searcher {
             } else {
                 flag = TTFlag.EXACT;
             }
-            transpositionTable.put(key, new TTEntry(bestValue, depth, flag));
+            transpositionTable.put(key, new TTEntry(bestValue, depth, flag, bestMove));
         }
         return bestValue;
     }

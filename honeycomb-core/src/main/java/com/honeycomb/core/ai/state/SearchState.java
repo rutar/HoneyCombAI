@@ -21,6 +21,8 @@ public final class SearchState {
     private final int[] moveCounts = new int[MAX_PLY + 1];
     private final int[] moves = new int[(MAX_PLY + 1) * SLICE_LENGTH];
     private final int[] moveDeltas = new int[(MAX_PLY + 1) * SLICE_LENGTH];
+    private final int[] quietBufferMoves = new int[SLICE_LENGTH];
+    private final int[] quietBufferDeltas = new int[SLICE_LENGTH];
 
     private int ply;
 
@@ -85,19 +87,50 @@ public final class SearchState {
     }
 
     public int generateMoves() {
+        return generateMoves(-1);
+    }
+
+    public int generateMoves(int ttBestMove) {
         long board = boards[ply];
         long available = (~board) & FULL_BOARD_MASK;
         int count = 0;
         int base = ply * SLICE_LENGTH;
+        if (ttBestMove >= 0 && ttBestMove < Board.CELL_COUNT) {
+            long mask = 1L << ttBestMove;
+            if ((available & mask) != 0L) {
+                long updated = board | mask;
+                int delta = ScoreCalculator.calculateScoreDelta(board, updated, ttBestMove);
+                moves[base] = ttBestMove;
+                moveDeltas[base] = delta;
+                available &= ~mask;
+                count = 1;
+            }
+        }
+
+        int quietCount = 0;
         while (available != 0) {
             int move = Long.numberOfTrailingZeros(available);
-            long updated = board | (1L << move);
+            long mask = 1L << move;
+            long updated = board | mask;
             int delta = ScoreCalculator.calculateScoreDelta(board, updated, move);
-            moves[base + count] = move;
-            moveDeltas[base + count] = delta;
+            if (delta > 0) {
+                moves[base + count] = move;
+                moveDeltas[base + count] = delta;
+                count++;
+            } else {
+                quietBufferMoves[quietCount] = move;
+                quietBufferDeltas[quietCount] = delta;
+                quietCount++;
+            }
             available &= available - 1;
+        }
+
+        for (int i = 0; i < quietCount; i++) {
+            moves[base + count] = quietBufferMoves[i];
+            moveDeltas[base + count] = quietBufferDeltas[i];
             count++;
         }
+
         moveCounts[ply] = count;
         return count;
     }

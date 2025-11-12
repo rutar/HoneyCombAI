@@ -25,15 +25,16 @@ class TranspositionTableTest {
     void keepsEntryWithGreaterDepth() {
         TranspositionTable table = new TranspositionTable(tempDir.resolve("depth.tt"));
 
-        table.put(7L, new TTEntry(5, 1, TTFlag.EXACT));
-        table.put(7L, new TTEntry(8, 3, TTFlag.LOWER_BOUND));
-        table.put(7L, new TTEntry(4, 2, TTFlag.UPPER_BOUND));
+        table.put(7L, new TTEntry(5, 1, TTFlag.EXACT, -1));
+        table.put(7L, new TTEntry(8, 3, TTFlag.LOWER_BOUND, 12));
+        table.put(7L, new TTEntry(4, 2, TTFlag.UPPER_BOUND, 9));
 
         TTEntry entry = table.get(7L);
         assertNotNull(entry);
         assertEquals(8, entry.value());
         assertEquals(3, entry.depth());
         assertSame(TTFlag.LOWER_BOUND, entry.flag());
+        assertEquals(12, entry.bestMove());
     }
 
     @Test
@@ -41,8 +42,8 @@ class TranspositionTableTest {
         Path file = tempDir.resolve("table.bin");
 
         TranspositionTable table = new TranspositionTable(file);
-        table.put(21L, new TTEntry(13, 2, TTFlag.EXACT));
-        table.put(22L, new TTEntry(7, 1, TTFlag.UPPER_BOUND));
+        table.put(21L, new TTEntry(13, 2, TTFlag.EXACT, 3));
+        table.put(22L, new TTEntry(7, 1, TTFlag.UPPER_BOUND, -1));
         table.saveToDisk();
 
         TranspositionTable loaded = new TranspositionTable(file);
@@ -55,23 +56,25 @@ class TranspositionTableTest {
         assertEquals(13, entry.value());
         assertEquals(2, entry.depth());
         assertSame(TTFlag.EXACT, entry.flag());
+        assertEquals(3, entry.bestMove());
     }
 
     @Test
     void exposesLastUpdateDetails() {
         TranspositionTable table = new TranspositionTable(tempDir.resolve("updates.tt"));
 
-        table.put(5L, new TTEntry(3, 2, TTFlag.EXACT));
+        table.put(5L, new TTEntry(3, 2, TTFlag.EXACT, 17));
 
         TranspositionTable.UpdateEvent first = table.getLastUpdate();
         assertNotNull(first);
         assertEquals(5L, first.key());
         assertSame(TTFlag.EXACT, first.entry().flag());
+        assertEquals(17, first.entry().bestMove());
         assertNull(first.previousEntry());
         assertTrue(first.replaced());
         assertEquals(1, first.sizeAfterUpdate());
 
-        table.put(5L, new TTEntry(9, 1, TTFlag.LOWER_BOUND));
+        table.put(5L, new TTEntry(9, 1, TTFlag.LOWER_BOUND, 4));
 
         TranspositionTable.UpdateEvent second = table.getLastUpdate();
         assertNotNull(second);
@@ -79,6 +82,7 @@ class TranspositionTableTest {
         assertFalse(second.replaced(), "Entry should remain unchanged when depth is shallower");
         assertSame(first.entry(), second.entry());
         assertSame(first.entry(), second.previousEntry());
+        assertEquals(17, second.entry().bestMove());
         assertEquals(1, second.sizeAfterUpdate());
     }
 
@@ -93,7 +97,7 @@ class TranspositionTableTest {
         table.loadFromDiskAsync().join();
         assertEquals(TranspositionTable.PersistenceStatus.READY, table.getPersistenceStatus());
 
-        table.put(1L, new TTEntry(2, 1, TTFlag.EXACT));
+        table.put(1L, new TTEntry(2, 1, TTFlag.EXACT, -1));
         table.saveToDiskAsync().join();
         assertEquals(TranspositionTable.PersistenceStatus.READY, table.getPersistenceStatus());
 
@@ -108,8 +112,8 @@ class TranspositionTableTest {
     void reusesOngoingLoadAndSkipsDuplicateReads() {
         Path file = tempDir.resolve("dedupe.tt");
         TranspositionTable source = new TranspositionTable(file);
-        source.put(1L, new TTEntry(3, 2, TTFlag.EXACT));
-        source.put(2L, new TTEntry(7, 1, TTFlag.LOWER_BOUND));
+        source.put(1L, new TTEntry(3, 2, TTFlag.EXACT, 2));
+        source.put(2L, new TTEntry(7, 1, TTFlag.LOWER_BOUND, 8));
         source.saveToDisk();
 
         TranspositionTable table = new TranspositionTable(file);
