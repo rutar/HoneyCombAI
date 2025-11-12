@@ -9,9 +9,12 @@ import com.honeycomb.visualizer.ui.BoardView;
 import com.honeycomb.visualizer.ui.StatsPane;
 import java.time.Duration;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -34,13 +37,13 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.stage.Stage;
-import javafx.application.Platform;
 
 public final class VisualizerApp extends Application {
 
     private static final int MAX_DEPTH = 6;
     private static final int DEFAULT_DEPTH = 3;
     private static final Duration TIME_LIMIT = Duration.ofMillis(200);
+    private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
 
     private final ObservableList<GameFrame> frames = FXCollections.observableArrayList();
     private final IntegerProperty currentIndex = new SimpleIntegerProperty(0);
@@ -65,7 +68,7 @@ public final class VisualizerApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        this.transpositionTable = new TranspositionTable();
+        this.transpositionTable = loadTranspositionTable();
         this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, transpositionTable);
         tableStatus.set(transpositionTable.getPersistenceStatus());
         transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
@@ -104,6 +107,17 @@ public final class VisualizerApp extends Application {
         stage.setMinWidth(960);
         stage.setMinHeight(720);
         stage.show();
+    }
+
+    private TranspositionTable loadTranspositionTable() {
+        TranspositionTable table = new TranspositionTable();
+        try {
+            table.loadFromDisk();
+        } catch (RuntimeException ex) {
+            LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", ex);
+            return new TranspositionTable();
+        }
+        return table;
     }
 
     private void setupIndexListener() {
