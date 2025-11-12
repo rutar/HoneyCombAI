@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javafx.animation.KeyFrame;
+import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -43,7 +44,8 @@ public final class VisualizerApp extends Application {
     private static final int MAX_DEPTH = 6;
     private static final int DEFAULT_DEPTH = 3;
     private static final Duration TIME_LIMIT = Duration.ofMillis(200);
-
+    private static final long MIN_ANIMATION_INTERVAL_NANOS = Duration.ofMillis(100).toNanos();
+    private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
     private final ObservableList<GameFrame> frames = FXCollections.observableArrayList();
     private final IntegerProperty currentIndex = new SimpleIntegerProperty(0);
     private final ObjectProperty<GameFrame> currentFrame = new SimpleObjectProperty<>();
@@ -53,6 +55,10 @@ public final class VisualizerApp extends Application {
             new SimpleObjectProperty<>(TranspositionTable.PersistenceStatus.NOT_LOADED);
 
     private Timeline playbackTimeline;
+    private PauseTransition animationThrottle;
+    private long lastAnimationUpdateNanos;
+    private int pendingSimulationIndex = -1;
+    private boolean animationUpdateScheduled;
     private NegamaxAI ai;
     private TranspositionTable transpositionTable;
     private BoardView boardView;
@@ -79,6 +85,7 @@ public final class VisualizerApp extends Application {
 
         setupIndexListener();
         setupPlaybackTimeline();
+        initializeAnimationThrottle();
 
         currentFrame.addListener((obs, oldFrame, newFrame) -> {
             boardView.update(newFrame);
@@ -159,6 +166,14 @@ public final class VisualizerApp extends Application {
     private void setupPlaybackTimeline() {
         playbackTimeline = new Timeline(new KeyFrame(javafx.util.Duration.millis(800), event -> advanceFrame()));
         playbackTimeline.setCycleCount(Timeline.INDEFINITE);
+    }
+
+    private void initializeAnimationThrottle() {
+        animationThrottle = new PauseTransition();
+        animationThrottle.setOnFinished(event -> {
+            animationUpdateScheduled = false;
+            applyPendingSimulationIndex();
+        });
     }
 
     private HBox buildControls() {
@@ -332,9 +347,46 @@ public final class VisualizerApp extends Application {
         simulationRunning.set(false);
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
+        cancelPendingSimulationUpdate();
     }
 
     private void requestSimulationIndexUpdate(int targetIndex) {
-        currentIndex.set(targetIndex);
+        pendingSimulationIndex = targetIndex;
+        long now = System.nanoTime();
+        long elapsed = now - lastAnimationUpdateNanos;
+        if (!animationUpdateScheduled && elapsed >= MIN_ANIMATION_INTERVAL_NANOS) {
+            applyPendingSimulationIndex();
+            return;
+        }
+        if (animationUpdateScheduled) {
+            return;
+        }
+        long delayNanos = Math.max(0L, MIN_ANIMATION_INTERVAL_NANOS - elapsed);
+        scheduleAnimationUpdate(delayNanos);
+    }
+
+    private void applyPendingSimulationIndex() {
+        if (pendingSimulationIndex < 0) {
+            return;
+        }
+        currentIndex.set(pendingSimulationIndex);
+        pendingSimulationIndex = -1;
+        lastAnimationUpdateNanos = System.nanoTime();
+    }
+
+    private void scheduleAnimationUpdate(long delayNanos) {
+        double delayMillis = delayNanos / 1_000_000.0;
+        animationThrottle.stop();
+        animationThrottle.setDuration(javafx.util.Duration.millis(delayMillis));
+        animationUpdateScheduled = true;
+        animationThrottle.playFromStart();
+    }
+
+    private void cancelPendingSimulationUpdate() {
+        if (animationThrottle != null) {
+            animationThrottle.stop();
+        }
+        animationUpdateScheduled = false;
+        pendingSimulationIndex = -1;
     }
 }
