@@ -73,10 +73,11 @@ public final class VisualizerApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        this.transpositionTable = loadTranspositionTable();
+        this.transpositionTable = new TranspositionTable();
         this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, transpositionTable);
         tableStatus.set(transpositionTable.getPersistenceStatus());
         transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
+        loadTranspositionTableAsync();
 
         boardView = new BoardView();
         statsPane = new StatsPane();
@@ -115,15 +116,12 @@ public final class VisualizerApp extends Application {
         stage.show();
     }
 
-    private TranspositionTable loadTranspositionTable() {
-        TranspositionTable table = new TranspositionTable();
-        try {
-            table.loadFromDisk();
-        } catch (RuntimeException ex) {
-            LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", ex);
-            return new TranspositionTable();
-        }
-        return table;
+    private void loadTranspositionTableAsync() {
+        transpositionTable.loadFromDiskAsync().exceptionally(ex -> {
+            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+            LOGGER.log(Level.WARNING, "Failed to load persisted transposition table", cause);
+            return null;
+        });
     }
 
     private void setupIndexListener() {
