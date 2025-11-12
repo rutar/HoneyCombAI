@@ -34,6 +34,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.stage.Stage;
+import javafx.application.Platform;
 
 public final class VisualizerApp extends Application {
 
@@ -46,6 +47,8 @@ public final class VisualizerApp extends Application {
     private final ObjectProperty<GameFrame> currentFrame = new SimpleObjectProperty<>();
     private final BooleanProperty playing = new SimpleBooleanProperty(false);
     private final BooleanProperty simulationRunning = new SimpleBooleanProperty(false);
+    private final ObjectProperty<TranspositionTable.PersistenceStatus> tableStatus =
+            new SimpleObjectProperty<>(TranspositionTable.PersistenceStatus.NOT_LOADED);
 
     private Timeline playbackTimeline;
     private NegamaxAI ai;
@@ -64,9 +67,12 @@ public final class VisualizerApp extends Application {
     public void start(Stage stage) {
         this.transpositionTable = new TranspositionTable();
         this.ai = new NegamaxAI(MAX_DEPTH, TIME_LIMIT, transpositionTable);
+        tableStatus.set(transpositionTable.getPersistenceStatus());
+        transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
 
         boardView = new BoardView();
         statsPane = new StatsPane();
+        statsPane.bindTableStatus(tableStatus);
 
         setupIndexListener();
         setupPlaybackTimeline();
