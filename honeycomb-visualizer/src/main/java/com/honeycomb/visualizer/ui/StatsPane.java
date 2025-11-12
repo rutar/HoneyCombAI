@@ -54,15 +54,18 @@ public final class StatsPane extends VBox {
         addRow(grid, 3, "Счет", scoreValue);
         addRow(grid, 4, "Посещено узлов", nodesValue);
         addRow(grid, 5, "Таймаут", timeoutValue);
-        HBox ttRow = new HBox(6, ttStatusIndicator, ttStatusText, ttSizeValue);
-        ttRow.setAlignment(Pos.CENTER_LEFT);
+        HBox ttStatusRow = new HBox(6, ttStatusIndicator, ttStatusText);
+        ttStatusRow.setAlignment(Pos.CENTER_LEFT);
+        HBox ttEntriesRow = new HBox(ttSizeValue);
+        ttEntriesRow.setAlignment(Pos.CENTER_LEFT);
         ttStatusIndicator.setTooltip(ttStatusTooltip);
-        addRow(grid, 6, "TT записи", ttRow);
-        addRow(grid, 7, "TT глубина", ttDepthValue);
-        addRow(grid, 8, "TT предыдущая глубина", ttPreviousDepthValue);
-        addRow(grid, 9, "TT оценка", ttValueValue);
-        addRow(grid, 10, "TT флаг", ttFlagValue);
-        addRow(grid, 11, "TT изменение", ttChangeValue);
+        addRow(grid, 6, "TT статус", ttStatusRow);
+        addRow(grid, 7, "TT записи", ttEntriesRow);
+        addRow(grid, 8, "TT глубина", ttDepthValue);
+        addRow(grid, 9, "TT предыдущая глубина", ttPreviousDepthValue);
+        addRow(grid, 10, "TT оценка", ttValueValue);
+        addRow(grid, 11, "TT флаг", ttFlagValue);
+        addRow(grid, 12, "TT изменение", ttChangeValue);
 
         getChildren().addAll(title, grid);
     }
