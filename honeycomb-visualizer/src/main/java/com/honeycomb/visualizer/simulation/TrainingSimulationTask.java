@@ -2,9 +2,12 @@ package com.honeycomb.visualizer.simulation;
 
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
-import com.honeycomb.core.ai.NegamaxAI;
+import com.honeycomb.core.ai.SearchConstraints;
+import com.honeycomb.core.ai.SearchResult;
+import com.honeycomb.core.ai.Searcher;
 import com.honeycomb.core.ai.TranspositionTable;
 import com.honeycomb.visualizer.model.GameFrame;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -13,23 +16,27 @@ import javafx.application.Platform;
 import javafx.concurrent.Task;
 
 /**
- * Background task that runs a single self-play simulation using the {@link NegamaxAI}.
+ * Background task that runs a single self-play simulation using a {@link Searcher}.
  */
 public final class TrainingSimulationTask extends Task<List<GameFrame>> {
 
-    private final NegamaxAI ai;
+    private final Searcher searcher;
     private final TranspositionTable table;
     private final int depthLimit;
+    private final Duration timeLimit;
+    private final SearchConstraints.SearchMode mode;
     private final Consumer<GameFrame> frameListener;
 
-    public TrainingSimulationTask(NegamaxAI ai, TranspositionTable table, int depthLimit,
-            Consumer<GameFrame> frameListener) {
-        this.ai = Objects.requireNonNull(ai, "ai");
+    public TrainingSimulationTask(Searcher searcher, TranspositionTable table, int depthLimit,
+            Duration timeLimit, SearchConstraints.SearchMode mode, Consumer<GameFrame> frameListener) {
+        this.searcher = Objects.requireNonNull(searcher, "searcher");
         this.table = Objects.requireNonNull(table, "table");
         if (depthLimit < 1) {
             throw new IllegalArgumentException("Depth limit must be at least 1");
         }
         this.depthLimit = depthLimit;
+        this.timeLimit = Objects.requireNonNull(timeLimit, "timeLimit");
+        this.mode = Objects.requireNonNull(mode, "mode");
         this.frameListener = Objects.requireNonNull(frameListener, "frameListener");
     }
 
@@ -55,7 +62,9 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
             updateProgress(state.getMoveNumber(), Board.CELL_COUNT);
 
             boolean firstToMove = state.getBoard().isFirstPlayer();
-            int move = ai.findBestMove(state, depthLimit);
+            SearchConstraints constraints = new SearchConstraints(depthLimit, timeLimit, mode);
+            SearchResult result = searcher.search(state, constraints);
+            int move = result.move();
 
             if (firstToMove) {
                 firstBits |= (1L << move);
@@ -69,8 +78,8 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                     move,
                     firstBits,
                     secondBits,
-                    ai.getLastVisitedNodeCount(),
-                    ai.wasLastSearchTimedOut(),
+                    result.visitedNodes(),
+                    result.timedOut(),
                     table.getLastUpdate(),
                     table.size(),
                     state.getMoveNumber());

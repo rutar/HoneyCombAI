@@ -2,6 +2,7 @@ package com.honeycomb.visualizer;
 
 import com.honeycomb.core.GameState;
 import com.honeycomb.core.ai.NegamaxAI;
+import com.honeycomb.core.ai.SearchConstraints;
 import com.honeycomb.core.ai.TranspositionTable;
 import com.honeycomb.visualizer.model.GameFrame;
 import com.honeycomb.visualizer.simulation.TrainingSimulationTask;
@@ -55,6 +56,7 @@ public final class VisualizerApp extends Application {
 
     private Timeline playbackTimeline;
     private NegamaxAI ai;
+    private SearchConstraints.SearchMode searchMode = SearchConstraints.SearchMode.SEQ;
     private TranspositionTable transpositionTable;
     private BoardView boardView;
     private StatsPane statsPane;
@@ -70,12 +72,14 @@ public final class VisualizerApp extends Application {
 
     @Override
     public void start(Stage stage) {
+        configureSearchMode(getParameters().getRaw());
         this.transpositionTable = new TranspositionTable();
 
         transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
         loadTranspositionTableAsync();
 
         this.ai = new NegamaxAI(MAX_DEPTH, DEFAULT_TIME_LIMIT, DEFAULT_MIN_THINK_TIME, transpositionTable);
+        this.ai.setMode(searchMode);
 
         boardView = new BoardView();
         statsPane = new StatsPane();
@@ -311,13 +315,15 @@ public final class VisualizerApp extends Application {
         Duration timeLimit = Duration.ofMillis(Math.max(0, normalizeSpinnerValue(timeLimitSpinner)));
         Duration minThinkTime = Duration.ofMillis(Math.max(0, normalizeSpinnerValue(minThinkTimeSpinner)));
         this.ai = new NegamaxAI(MAX_DEPTH, timeLimit, minThinkTime, transpositionTable);
+        this.ai.setMode(searchMode);
 
         GameFrame initialFrame = GameFrame.initial(new GameState(), transpositionTable);
         frames.setAll(initialFrame);
         currentIndex.set(0);
         currentFrame.set(initialFrame);
 
-        TrainingSimulationTask task = new TrainingSimulationTask(ai, transpositionTable, depthLimit, frame -> {
+        TrainingSimulationTask task = new TrainingSimulationTask(ai, transpositionTable, depthLimit, timeLimit,
+                searchMode, frame -> {
             frames.add(frame);
             if (simulationRunning.get()) {
                 currentIndex.set(frames.size() - 1);
@@ -386,5 +392,29 @@ public final class VisualizerApp extends Application {
         statusLabel.textProperty().unbind();
     }
 
-
+    private void configureSearchMode(List<String> args) {
+        if (args == null) {
+            return;
+        }
+        for (String arg : args) {
+            if (arg == null) {
+                continue;
+            }
+            String trimmed = arg.trim();
+            if (!trimmed.startsWith("--search-mode=")) {
+                continue;
+            }
+            String value = trimmed.substring("--search-mode=".length()).trim();
+            if (value.isEmpty()) {
+                continue;
+            }
+            String normalized = value.toUpperCase();
+            try {
+                searchMode = SearchConstraints.SearchMode.valueOf(normalized);
+            } catch (IllegalArgumentException ex) {
+                LOGGER.log(Level.WARNING, "Unknown search mode: " + value, ex);
+            }
+            break;
+        }
+    }
 }
