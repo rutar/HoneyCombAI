@@ -3,6 +3,7 @@ package com.honeycomb.core.ai;
 import com.honeycomb.core.GameState;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -76,7 +77,11 @@ public final class Trainer {
         LOGGER.info(() -> String.format("Completed training game %d (depth=%d, addedEntries=%d, averageScore=%.2f)",
                 gameNumber, depth, added, average));
 
-        transpositionTable.saveToDisk();
+        transpositionTable.saveToDiskAsync().whenComplete((ignored, error) -> {
+            if (error != null) {
+                LOGGER.log(Level.WARNING, "Failed to save transposition table after training game", error);
+            }
+        });
     }
 
     public interface DepthScheduler {

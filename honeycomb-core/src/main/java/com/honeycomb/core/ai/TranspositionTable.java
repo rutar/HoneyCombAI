@@ -8,11 +8,18 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.function.Consumer;
 
 /**
  * Thread-safe transposition table that supports persistence across engine runs.
@@ -25,7 +32,14 @@ public final class TranspositionTable {
 
     private final ConcurrentHashMap<Long, TTEntry> entries = new ConcurrentHashMap<>();
     private final Path storagePath;
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "transposition-table-io");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final List<Consumer<PersistenceStatus>> listeners = new CopyOnWriteArrayList<>();
     private volatile UpdateEvent lastUpdate;
+    private volatile PersistenceStatus persistenceStatus = PersistenceStatus.NOT_LOADED;
 
     public TranspositionTable() {
         this(DEFAULT_PATH);
@@ -77,14 +91,49 @@ public final class TranspositionTable {
     }
 
     public void loadFromDisk() {
-        loadFromDisk(storagePath);
+        loadFromDiskAsync().join();
     }
 
     public void saveToDisk() {
-        saveToDisk(storagePath);
+        saveToDiskAsync().join();
     }
 
-    private void loadFromDisk(Path path) {
+    public CompletableFuture<Void> loadFromDiskAsync() {
+        return submitPersistenceTask(PersistenceStatus.LOADING, () -> loadFromDiskInternal(storagePath));
+    }
+
+    public CompletableFuture<Void> saveToDiskAsync() {
+        return submitPersistenceTask(PersistenceStatus.SAVING, () -> saveToDiskInternal(storagePath));
+    }
+
+    public PersistenceStatus getPersistenceStatus() {
+        return persistenceStatus;
+    }
+
+    public void addPersistenceListener(Consumer<PersistenceStatus> listener) {
+        listeners.add(Objects.requireNonNull(listener, "listener"));
+    }
+
+    public void removePersistenceListener(Consumer<PersistenceStatus> listener) {
+        listeners.remove(listener);
+    }
+
+    private CompletableFuture<Void> submitPersistenceTask(PersistenceStatus runningStatus, Runnable action) {
+        Objects.requireNonNull(runningStatus, "runningStatus");
+        Objects.requireNonNull(action, "action");
+        return CompletableFuture.runAsync(() -> {
+            setPersistenceStatus(runningStatus);
+            try {
+                action.run();
+                setPersistenceStatus(PersistenceStatus.READY);
+            } catch (RuntimeException ex) {
+                setPersistenceStatus(PersistenceStatus.NOT_LOADED);
+                throw new CompletionException(ex);
+            }
+        }, ioExecutor);
+    }
+
+    private void loadFromDiskInternal(Path path) {
         if (path == null) {
             return;
         }
@@ -106,10 +155,11 @@ public final class TranspositionTable {
             LOGGER.info(() -> String.format("Loaded %d transposition entries from %s", count, path));
         } catch (IOException | RuntimeException ex) {
             LOGGER.log(Level.WARNING, "Failed to load transposition table from " + path, ex);
+            throw new RuntimeException(ex);
         }
     }
 
-    private void saveToDisk(Path path) {
+    private void saveToDiskInternal(Path path) {
         if (path == null) {
             return;
         }
@@ -120,7 +170,7 @@ public final class TranspositionTable {
             }
         } catch (IOException ex) {
             LOGGER.log(Level.WARNING, "Failed to prepare directory for transposition table", ex);
-            return;
+            throw new RuntimeException(ex);
         }
 
         try (DataOutputStream output = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(path)))) {
@@ -136,10 +186,29 @@ public final class TranspositionTable {
             LOGGER.info(() -> String.format("Saved %d transposition entries to %s", entries.size(), path));
         } catch (IOException ex) {
             LOGGER.log(Level.WARNING, "Failed to save transposition table to " + path, ex);
+            throw new RuntimeException(ex);
         }
     }
 
     public record UpdateEvent(long key, TTEntry entry, TTEntry previousEntry, boolean replaced, int sizeAfterUpdate) {
+    }
+
+    public enum PersistenceStatus {
+        NOT_LOADED,
+        LOADING,
+        SAVING,
+        READY
+    }
+
+    private void setPersistenceStatus(PersistenceStatus status) {
+        persistenceStatus = status;
+        for (Consumer<PersistenceStatus> listener : listeners) {
+            try {
+                listener.accept(status);
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "Persistence listener failed", ex);
+            }
+        }
     }
 
     private static final class PutContext {
