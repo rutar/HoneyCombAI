@@ -13,6 +13,11 @@ import javafx.scene.shape.Line;
 import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Shape;
 import javafx.scene.shape.StrokeLineCap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Visual representation of the Honeycomb playing field.
@@ -27,8 +32,7 @@ public final class BoardView extends Pane {
     private static final Paint GRID_STROKE = Color.rgb(170, 177, 189);
     private static final Paint FIRST_PLAYER_FILL = Color.web("#4F6BED");
     private static final Paint SECOND_PLAYER_FILL = Color.web("#E57373");
-    private static final Paint FIRST_AVAILABLE_FILL = Color.web("#DDE5FF");
-    private static final Paint SECOND_AVAILABLE_FILL = Color.web("#FAD8D6");
+    private static final Paint AVAILABLE_FILL = Color.web("#E3E9FF");
     private static final Paint FIRST_LINE_COLOR = Color.web("#243A9A");
     private static final Paint SECOND_LINE_COLOR = Color.web("#B71C1C");
     private static final Paint LAST_MOVE_FILL = Color.web("#FFB300", 0.45);
@@ -41,11 +45,15 @@ public final class BoardView extends Pane {
     private final double[] centerX = new double[Board.CELL_COUNT];
     private final double[] centerY = new double[Board.CELL_COUNT];
     private final Shape[] lineOverlays = new Shape[ScoreCalculator.TOTAL_LINES];
+    private final Paint[] lineOwners = new Paint[ScoreCalculator.TOTAL_LINES];
+    private final Map<Integer, List<Integer>> linesCompletedByPly = new HashMap<>();
     private final Group boardGroup;
     private final Group lineGroup;
     private final Circle lastMoveMarker;
     private double contentWidth;
     private double contentHeight;
+    private long currentBoardBits;
+    private int currentPly = -1;
 
     public BoardView() {
         setPadding(new Insets(16));
@@ -133,7 +141,7 @@ public final class BoardView extends Pane {
                     cell.setStrokeWidth(DEFAULT_STROKE_WIDTH);
                 }
             }
-            hideLineOverlays();
+            resetLineState();
             lastMoveMarker.setVisible(false);
             return;
         }
@@ -142,7 +150,6 @@ public final class BoardView extends Pane {
         long secondBits = frame.secondPlayerBits();
         long boardBits = frame.state().getBoard().getBits();
         long available = (~boardBits) & FULL_BOARD_MASK;
-        boolean firstPlayerTurn = frame.state().getBoard().isFirstPlayer();
         int lastMove = frame.lastMove();
         boolean hasLastMove = frame.hasLastMove();
 
@@ -158,7 +165,7 @@ public final class BoardView extends Pane {
             } else if (((secondBits >>> index) & 1L) != 0L) {
                 fill = SECOND_PLAYER_FILL;
             } else if (((available >>> index) & 1L) != 0L) {
-                fill = firstPlayerTurn ? FIRST_AVAILABLE_FILL : SECOND_AVAILABLE_FILL;
+                fill = AVAILABLE_FILL;
             } else {
                 fill = EMPTY_FILL;
             }
@@ -168,8 +175,11 @@ public final class BoardView extends Pane {
             cell.setStrokeWidth(DEFAULT_STROKE_WIDTH);
         }
 
-        updateLineOverlays(firstBits, secondBits);
+        updateLineOverlays(frame, firstBits, secondBits, boardBits);
         updateLastMoveMarker(hasLastMove, lastMove);
+
+        currentBoardBits = boardBits;
+        currentPly = frame.ply();
     }
 
     @Override
@@ -231,6 +241,65 @@ public final class BoardView extends Pane {
         }
     }
 
+    private void updateLineOverlays(GameFrame frame, long firstBits, long secondBits, long boardBits) {
+        int newPly = frame.ply();
+        if (currentPly == -1 || Math.abs(newPly - currentPly) != 1) {
+            resetLineState();
+        } else if (newPly < currentPly) {
+            List<Integer> removed = linesCompletedByPly.remove(currentPly);
+            if (removed != null) {
+                for (int lineIndex : removed) {
+                    lineOwners[lineIndex] = null;
+                }
+            }
+        } else if (newPly > currentPly) {
+            long previousBoard = currentBoardBits;
+            boolean lastMoveByFirst = frame.hasLastMove() && !frame.state().getBoard().isFirstPlayer();
+            Paint ownerColor = lastMoveByFirst ? FIRST_LINE_COLOR : SECOND_LINE_COLOR;
+            List<Integer> completed = null;
+            for (int lineIndex = 0; lineIndex < lineOverlays.length; lineIndex++) {
+                long mask = LINE_MASKS[lineIndex];
+                boolean wasComplete = (previousBoard & mask) == mask;
+                boolean isComplete = (boardBits & mask) == mask;
+                if (!wasComplete && isComplete) {
+                    lineOwners[lineIndex] = ownerColor;
+                    if (completed == null) {
+                        completed = new ArrayList<>();
+                    }
+                    completed.add(lineIndex);
+                }
+            }
+            if (completed != null) {
+                linesCompletedByPly.put(newPly, completed);
+            }
+        }
+
+        for (int lineIndex = 0; lineIndex < lineOverlays.length; lineIndex++) {
+            Shape overlay = lineOverlays[lineIndex];
+            if (overlay == null) {
+                continue;
+            }
+
+            long mask = LINE_MASKS[lineIndex];
+            if ((boardBits & mask) == mask) {
+                Paint color = lineOwners[lineIndex];
+                if (color == null) {
+                    color = determineFallbackOwner(frame, mask, firstBits, secondBits);
+                    lineOwners[lineIndex] = color;
+                }
+                if (color != null) {
+                    applyLineColor(overlay, color);
+                    overlay.setVisible(true);
+                } else {
+                    overlay.setVisible(false);
+                }
+            } else {
+                overlay.setVisible(false);
+                lineOwners[lineIndex] = null;
+            }
+        }
+    }
+
     private void hideLineOverlays() {
         for (Shape overlay : lineOverlays) {
             if (overlay != null) {
@@ -239,21 +308,12 @@ public final class BoardView extends Pane {
         }
     }
 
-    private void updateLineOverlays(long firstBits, long secondBits) {
+    private void resetLineState() {
         hideLineOverlays();
-        for (int lineIndex = 0; lineIndex < lineOverlays.length; lineIndex++) {
-            Shape overlay = lineOverlays[lineIndex];
-            if (overlay == null) {
-                continue;
-            }
-
-            long mask = LINE_MASKS[lineIndex];
-            if ((firstBits & mask) == mask) {
-                applyLineColor(overlay, FIRST_LINE_COLOR);
-            } else if ((secondBits & mask) == mask) {
-                applyLineColor(overlay, SECOND_LINE_COLOR);
-            }
-        }
+        Arrays.fill(lineOwners, null);
+        linesCompletedByPly.clear();
+        currentBoardBits = 0L;
+        currentPly = -1;
     }
 
     private void updateLastMoveMarker(boolean hasLastMove, int lastMove) {
@@ -274,6 +334,19 @@ public final class BoardView extends Pane {
             circle.setFill(color);
         }
         overlay.setVisible(true);
+    }
+
+    private Paint determineFallbackOwner(GameFrame frame, long mask, long firstBits, long secondBits) {
+        if (frame.hasLastMove() && ((mask >>> frame.lastMove()) & 1L) != 0L) {
+            boolean lastMoveByFirst = !frame.state().getBoard().isFirstPlayer();
+            return lastMoveByFirst ? FIRST_LINE_COLOR : SECOND_LINE_COLOR;
+        }
+        int firstCount = Long.bitCount(firstBits & mask);
+        int secondCount = Long.bitCount(secondBits & mask);
+        if (firstCount == 0 && secondCount == 0) {
+            return null;
+        }
+        return firstCount >= secondCount ? FIRST_LINE_COLOR : SECOND_LINE_COLOR;
     }
 
     private static int[] extractCells(long mask) {

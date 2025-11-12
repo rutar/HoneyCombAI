@@ -28,6 +28,9 @@ public final class StatsPane extends VBox {
         setPadding(new Insets(16));
         setSpacing(12);
         setStyle("-fx-background-color: rgba(255,255,255,0.85); -fx-border-color: #d0d6e6; -fx-border-radius: 6; -fx-background-radius: 6;");
+        setPrefWidth(280);
+        setMinWidth(280);
+        setMaxWidth(280);
 
         Label title = new Label("Статистика");
         title.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
