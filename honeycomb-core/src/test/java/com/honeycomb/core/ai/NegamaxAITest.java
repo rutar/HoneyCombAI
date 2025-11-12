@@ -6,8 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 class NegamaxAITest {
@@ -44,18 +48,46 @@ class NegamaxAITest {
     }
 
     @Test
-    void reusesTranspositionTableBetweenSearches() {
-        NegamaxAI ai = new NegamaxAI(3, Duration.ofMillis(50));
+    void reusesTranspositionTableBetweenSearches() throws InterruptedException {
+        Path storagePath = Paths.get("build/tmp/test-transposition-table.bin");
+        TranspositionTable table = new TranspositionTable(storagePath);
+
+        NegamaxAI ai = new NegamaxAI(3, Duration.ofMillis(50), table);
+        awaitPersistenceReady(table);
         GameState state = new GameState();
 
         ai.findBestMove(state);
         long firstRunNodes = ai.getLastVisitedNodeCount();
 
+        awaitPersistenceReady(table);
         ai.findBestMove(state);
         long secondRunNodes = ai.getLastVisitedNodeCount();
 
         assertTrue(firstRunNodes > 0, "Search should visit at least one node");
         assertTrue(secondRunNodes <= firstRunNodes, "Transposition table should avoid exploring additional nodes");
+    }
+
+    private void awaitPersistenceReady(TranspositionTable table) throws InterruptedException {
+        if (table.getPersistenceStatus() == TranspositionTable.PersistenceStatus.READY) {
+            return;
+        }
+
+        CountDownLatch latch = new CountDownLatch(1);
+        Consumer<TranspositionTable.PersistenceStatus> listener = status -> {
+            if (status == TranspositionTable.PersistenceStatus.READY) {
+                latch.countDown();
+            }
+        };
+        table.addPersistenceListener(listener);
+        try {
+            if (table.getPersistenceStatus() == TranspositionTable.PersistenceStatus.READY) {
+                return;
+            }
+            boolean loaded = latch.await(2, TimeUnit.SECONDS);
+            assertTrue(loaded, "Transposition table did not finish loading in time");
+        } finally {
+            table.removePersistenceListener(listener);
+        }
     }
 
     @Test
