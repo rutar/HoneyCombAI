@@ -29,6 +29,7 @@ public final class TranspositionTable {
     private static final Logger LOGGER = Logger.getLogger(TranspositionTable.class.getName());
     private static final String DEFAULT_FILE_NAME = "transposition-table.bin";
     private static final Path DEFAULT_PATH = Paths.get(System.getProperty("user.home"), ".honeycomb", DEFAULT_FILE_NAME);
+    private static final CompletableFuture<Void> COMPLETED_LOAD = CompletableFuture.completedFuture(null);
 
     private final ConcurrentHashMap<Long, TTEntry> entries = new ConcurrentHashMap<>();
     private final Path storagePath;
@@ -40,6 +41,8 @@ public final class TranspositionTable {
     private final List<Consumer<PersistenceStatus>> listeners = new CopyOnWriteArrayList<>();
     private volatile UpdateEvent lastUpdate;
     private volatile PersistenceStatus persistenceStatus = PersistenceStatus.NOT_LOADED;
+    private final Object loadLock = new Object();
+    private CompletableFuture<Void> loadFuture;
 
     public TranspositionTable() {
         this(DEFAULT_PATH);
@@ -99,7 +102,24 @@ public final class TranspositionTable {
     }
 
     public CompletableFuture<Void> loadFromDiskAsync() {
-        return submitPersistenceTask(PersistenceStatus.LOADING, () -> loadFromDiskInternal(storagePath));
+        synchronized (loadLock) {
+            if (loadFuture != null) {
+                return loadFuture;
+            }
+            if (persistenceStatus == PersistenceStatus.READY) {
+                return COMPLETED_LOAD;
+            }
+            CompletableFuture<Void> future = submitPersistenceTask(PersistenceStatus.LOADING, () -> loadFromDiskInternal(storagePath));
+            loadFuture = future;
+            future.whenComplete((ignored, error) -> {
+                synchronized (loadLock) {
+                    if (loadFuture == future) {
+                        loadFuture = null;
+                    }
+                }
+            });
+            return future;
+        }
     }
 
     public CompletableFuture<Void> saveToDiskAsync() {

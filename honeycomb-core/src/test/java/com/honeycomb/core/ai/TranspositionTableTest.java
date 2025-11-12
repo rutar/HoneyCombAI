@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -100,5 +102,30 @@ class TranspositionTableTest {
                 TranspositionTable.PersistenceStatus.READY,
                 TranspositionTable.PersistenceStatus.SAVING,
                 TranspositionTable.PersistenceStatus.READY), statuses);
+    }
+
+    @Test
+    void reusesOngoingLoadAndSkipsDuplicateReads() {
+        Path file = tempDir.resolve("dedupe.tt");
+        TranspositionTable source = new TranspositionTable(file);
+        source.put(1L, new TTEntry(3, 2, TTFlag.EXACT));
+        source.put(2L, new TTEntry(7, 1, TTFlag.LOWER_BOUND));
+        source.saveToDisk();
+
+        TranspositionTable table = new TranspositionTable(file);
+
+        CompletableFuture<Void> first = table.loadFromDiskAsync();
+        CompletableFuture<Void> second = table.loadFromDiskAsync();
+
+        assertSame(first, second, "Concurrent load requests should reuse the same task");
+
+        first.join();
+
+        CompletableFuture<Void> third = table.loadFromDiskAsync();
+        assertNotSame(first, third, "Completed load should return an already completed future");
+        assertTrue(third.isDone());
+        third.join();
+
+        assertEquals(2, table.size());
     }
 }
