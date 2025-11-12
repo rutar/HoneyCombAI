@@ -30,6 +30,7 @@ public final class StatsPane extends VBox {
     private final Label ttPreviousDepthValue = valueLabel();
     private final Label ttValueValue = valueLabel();
     private final Label ttStatusIndicator = statusIndicator();
+    private final Label ttStatusText = statusTextLabel();
     private final Tooltip ttStatusTooltip = new Tooltip("Транспозиционная таблица не загружена");
 
     public StatsPane() {
@@ -53,7 +54,7 @@ public final class StatsPane extends VBox {
         addRow(grid, 3, "Счет", scoreValue);
         addRow(grid, 4, "Посещено узлов", nodesValue);
         addRow(grid, 5, "Таймаут", timeoutValue);
-        HBox ttRow = new HBox(6, ttStatusIndicator, ttSizeValue);
+        HBox ttRow = new HBox(6, ttStatusIndicator, ttStatusText, ttSizeValue);
         ttRow.setAlignment(Pos.CENTER_LEFT);
         ttStatusIndicator.setTooltip(ttStatusTooltip);
         addRow(grid, 6, "TT записи", ttRow);
@@ -126,29 +127,37 @@ public final class StatsPane extends VBox {
                 : status;
         String color;
         String description;
+        String shortDescription;
         switch (value) {
             case READY -> {
                 color = "#5cb85c";
                 description = "Транспозиционная таблица загружена";
+                shortDescription = "загружена";
             }
             case LOADING, SAVING -> {
                 color = "#f0ad4e";
                 description = value == TranspositionTable.PersistenceStatus.LOADING
                         ? "Транспозиционная таблица загружается"
                         : "Транспозиционная таблица сохраняется";
+                shortDescription = value == TranspositionTable.PersistenceStatus.LOADING
+                        ? "загрузка"
+                        : "сохранение";
             }
             case NOT_LOADED -> {
                 color = "#d9534f";
                 description = "Транспозиционная таблица не загружена";
+                shortDescription = "не загружена";
             }
             default -> {
                 color = "#d9534f";
                 description = "Состояние таблицы неизвестно";
+                shortDescription = "неизвестно";
             }
         }
         ttStatusIndicator.setStyle("-fx-font-size: 16px; -fx-text-fill: " + color + ";");
         ttStatusIndicator.setAccessibleText(description);
         ttStatusTooltip.setText(description);
+        ttStatusText.setText("(" + shortDescription + ")");
     }
 
     private static void addRow(GridPane grid, int row, String label, Node value) {
@@ -166,6 +175,13 @@ public final class StatsPane extends VBox {
     private static Label statusIndicator() {
         Label label = new Label("\uD83D\uDCA1");
         label.setStyle("-fx-font-size: 16px; -fx-text-fill: #d9534f;");
+        label.setFocusTraversable(false);
+        return label;
+    }
+
+    private static Label statusTextLabel() {
+        Label label = new Label("(не загружена)");
+        label.setStyle("-fx-font-size: 14px; -fx-text-fill: #4a4f64;");
         label.setFocusTraversable(false);
         return label;
     }
