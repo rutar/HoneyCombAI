@@ -45,7 +45,10 @@ class NegamaxAITest {
 
     @Test
     void reusesTranspositionTableBetweenSearches() {
-        NegamaxAI ai = new NegamaxAI(3, Duration.ofMillis(50));
+        TranspositionTable table = new TranspositionTable();
+        table.loadFromDisk();
+
+        NegamaxAI ai = new NegamaxAI(3, Duration.ofMillis(50), table);
         GameState state = new GameState();
 
         ai.findBestMove(state);
