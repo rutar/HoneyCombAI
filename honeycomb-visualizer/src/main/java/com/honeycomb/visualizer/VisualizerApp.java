@@ -40,7 +40,7 @@ import javafx.stage.Stage;
 
 public final class VisualizerApp extends Application {
 
-    private static final int MAX_DEPTH = 6;
+    private static final int MAX_DEPTH = 9;
     private static final int DEFAULT_DEPTH = 3;
     private static final Duration DEFAULT_TIME_LIMIT = Duration.ofMillis(2000);
     private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(75);
@@ -71,10 +71,11 @@ public final class VisualizerApp extends Application {
     @Override
     public void start(Stage stage) {
         this.transpositionTable = new TranspositionTable();
-        this.ai = new NegamaxAI(MAX_DEPTH, DEFAULT_TIME_LIMIT, DEFAULT_MIN_THINK_TIME, transpositionTable);
-        tableStatus.set(transpositionTable.getPersistenceStatus());
+
         transpositionTable.addPersistenceListener(status -> Platform.runLater(() -> tableStatus.set(status)));
         loadTranspositionTableAsync();
+
+        this.ai = new NegamaxAI(MAX_DEPTH, DEFAULT_TIME_LIMIT, DEFAULT_MIN_THINK_TIME, transpositionTable);
 
         boardView = new BoardView();
         statsPane = new StatsPane();
@@ -378,9 +379,12 @@ public final class VisualizerApp extends Application {
         return value == null ? 0 : value;
     }
 
+
     private void cleanupTaskBindings() {
         simulationRunning.set(false);
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
     }
+
+
 }
