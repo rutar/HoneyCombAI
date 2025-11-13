@@ -31,7 +31,9 @@ public final class TranspositionTable {
     private static final Path DEFAULT_PATH = Paths.get(System.getProperty("user.home"), ".honeycomb", DEFAULT_FILE_NAME);
     private static final CompletableFuture<Void> COMPLETED_LOAD = CompletableFuture.completedFuture(null);
 
-    private final ConcurrentHashMap<Long, TTEntry> entries = new ConcurrentHashMap<>();
+    private static final int DEFAULT_SHARD_COUNT = 64;
+    private final Shard[] shards;
+    private final int shardMask;
     private final Path storagePath;
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "transposition-table-io");
@@ -50,43 +52,34 @@ public final class TranspositionTable {
 
     public TranspositionTable(Path storagePath) {
         this.storagePath = storagePath;
+        this.shards = createShards(DEFAULT_SHARD_COUNT);
+        this.shardMask = shards.length - 1;
     }
 
     public TTEntry get(long key) {
-        return entries.get(key);
+        return shardFor(key).get(key);
     }
 
     public void put(long key, TTEntry entry) {
         Objects.requireNonNull(entry, "entry");
         PutContext context = new PutContext();
-        entries.compute(key, (ignored, existing) -> {
-            if (existing == null) {
-                context.previous = null;
-                context.stored = entry;
-                context.replaced = true;
-                return entry;
-            }
-            if (existing.depth() >= entry.depth()) {
-                context.previous = existing;
-                context.stored = existing;
-                context.replaced = false;
-                return existing;
-            }
-            context.previous = existing;
-            context.stored = entry;
-            context.replaced = true;
-            return entry;
-        });
+        shardFor(key).computePut(key, entry, context);
         lastUpdate = new UpdateEvent(key, context.stored, context.previous, context.replaced, size());
     }
 
     public void clear() {
-        entries.clear();
+        for (Shard shard : shards) {
+            shard.clear();
+        }
         lastUpdate = null;
     }
 
     public int size() {
-        return entries.size();
+        int total = 0;
+        for (Shard shard : shards) {
+            total += shard.size();
+        }
+        return total;
     }
 
     public UpdateEvent getLastUpdate() {
@@ -171,7 +164,7 @@ public final class TranspositionTable {
         long entrySizeV2 = entrySizeV1 + Integer.BYTES;
 
         try (DataInputStream input = new DataInputStream(new BufferedInputStream(Files.newInputStream(path)))) {
-            entries.clear();
+            clear();
             lastUpdate = null;
             int count = input.readInt();
             long expectedV1 = Integer.BYTES + (long) count * entrySizeV1;
@@ -191,7 +184,7 @@ public final class TranspositionTable {
                     LOGGER.log(Level.WARNING, "Unexpected transposition table size: {0} bytes", fileSize);
                     warnedAboutSize = true;
                 }
-                entries.put(key, new TTEntry(value, depth, flag, bestMove));
+                shardFor(key).putLoaded(key, new TTEntry(value, depth, flag, bestMove));
             }
             LOGGER.info(() -> String.format("Loaded %d transposition entries from %s", count, path));
         } catch (IOException | RuntimeException ex) {
@@ -215,17 +208,20 @@ public final class TranspositionTable {
         }
 
         try (DataOutputStream output = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(path)))) {
-            output.writeInt(entries.size());
-            for (Map.Entry<Long, TTEntry> entry : entries.entrySet()) {
-                output.writeLong(entry.getKey());
-                TTEntry value = entry.getValue();
-                output.writeInt(value.value());
-                output.writeInt(value.depth());
-                output.writeByte(value.flag().ordinal());
-                output.writeInt(value.bestMove());
+            int totalSize = size();
+            output.writeInt(totalSize);
+            for (Shard shard : shards) {
+                for (Map.Entry<Long, TTEntry> entry : shard.entries()) {
+                    output.writeLong(entry.getKey());
+                    TTEntry value = entry.getValue();
+                    output.writeInt(value.value());
+                    output.writeInt(value.depth());
+                    output.writeByte(value.flag().ordinal());
+                    output.writeInt(value.bestMove());
+                }
             }
             output.flush();
-            LOGGER.info(() -> String.format("Saved %d transposition entries to %s", entries.size(), path));
+            LOGGER.info(() -> String.format("Saved %d transposition entries to %s", totalSize, path));
         } catch (IOException ex) {
             LOGGER.log(Level.WARNING, "Failed to save transposition table to " + path, ex);
             throw new RuntimeException(ex);
@@ -258,5 +254,73 @@ public final class TranspositionTable {
         private TTEntry stored;
         private TTEntry previous;
         private boolean replaced;
+    }
+
+    private Shard shardFor(long key) {
+        int hash = spreadHash(key);
+        return shards[hash & shardMask];
+    }
+
+    private static int spreadHash(long key) {
+        int hash = Long.hashCode(key);
+        hash ^= (hash >>> 16);
+        return hash;
+    }
+
+    private static Shard[] createShards(int shardCount) {
+        if (shardCount <= 0 || Integer.bitCount(shardCount) != 1) {
+            throw new IllegalArgumentException("shardCount must be a power of two");
+        }
+        Shard[] shards = new Shard[shardCount];
+        for (int i = 0; i < shardCount; i++) {
+            shards[i] = new Shard();
+        }
+        return shards;
+    }
+
+    private static final class Shard {
+
+        private final ConcurrentHashMap<Long, TTEntry> entries = new ConcurrentHashMap<>();
+
+        TTEntry get(long key) {
+            return entries.get(key);
+        }
+
+        void computePut(long key, TTEntry entry, PutContext context) {
+            entries.compute(key, (ignored, existing) -> {
+                if (existing == null) {
+                    context.previous = null;
+                    context.stored = entry;
+                    context.replaced = true;
+                    return entry;
+                }
+                if (existing.depth() >= entry.depth()) {
+                    context.previous = existing;
+                    context.stored = existing;
+                    context.replaced = false;
+                    return existing;
+                }
+                context.previous = existing;
+                context.stored = entry;
+                context.replaced = true;
+                return entry;
+            });
+        }
+
+        void putLoaded(long key, TTEntry entry) {
+            entries.put(key, entry);
+        }
+
+        void clear() {
+            entries.clear();
+        }
+
+        int size() {
+            return entries.size();
+        }
+
+        Iterable<Map.Entry<Long, TTEntry>> entries() {
+            return entries.entrySet();
+        }
     }
 }
