@@ -53,7 +53,7 @@ public final class GameState {
      * Returns the move number starting from zero.
      */
     public int getMoveNumber() {
-        return board.countBits();
+        return board.countBits() - Board.BLOCKED_CELL_COUNT;
     }
 
     /**

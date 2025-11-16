@@ -53,7 +53,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
         }
 
         updateMessage("Подготовка...");
-        updateProgress(0, Board.CELL_COUNT);
+        updateProgress(0, Board.PLAYABLE_CELL_COUNT);
 
         List<GameFrame> frames = new ArrayList<>();
         GameState state = new GameState();
@@ -69,7 +69,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
 
             int moveNumber = state.getMoveNumber() + 1;
             updateMessage(String.format("Поиск хода %d", moveNumber));
-            updateProgress(state.getMoveNumber(), Board.CELL_COUNT);
+            updateProgress(state.getMoveNumber(), Board.PLAYABLE_CELL_COUNT);
 
             boolean firstToMove = state.getBoard().isFirstPlayer();
             SearchConstraints constraints = new SearchConstraints(depthLimit, timeLimit, mode);
@@ -96,11 +96,11 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                     state.getMoveNumber());
             frames.add(frame);
             publishFrame(frame);
-            updateProgress(state.getMoveNumber(), Board.CELL_COUNT);
+            updateProgress(state.getMoveNumber(), Board.PLAYABLE_CELL_COUNT);
             updateMessage(String.format("Ход %d найден", moveNumber));
         }
 
-        updateProgress(Board.CELL_COUNT, Board.CELL_COUNT);
+        updateProgress(Board.PLAYABLE_CELL_COUNT, Board.PLAYABLE_CELL_COUNT);
         updateMessage("Симуляция завершена");
         return frames;
     }

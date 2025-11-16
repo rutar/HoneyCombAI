@@ -1,5 +1,6 @@
 package com.honeycomb.core;
 
+import java.util.Arrays;
 import java.util.Scanner;
 
 /**
@@ -15,6 +16,8 @@ public final class HoneycombCLI {
         GameState state = new GameState();
 
         System.out.println("Honeycomb — console edition");
+        System.out.printf("Neutral corner cells %s are blocked and unavailable.%n",
+                Arrays.toString(Board.BLOCKED_CELLS));
         while (!state.isGameOver()) {
             printBoard(state);
             System.out.printf("Scores — Player 1: %d, Player 2: %d%n", state.getScore(true), state.getScore(false));
@@ -33,6 +36,10 @@ public final class HoneycombCLI {
                 System.out.println("Cell index must be between 0 and 54.");
                 continue;
             }
+            if (Board.isBlockedCell(cellIndex)) {
+                System.out.println("This cell is blocked by the board rules. Choose another one.");
+                continue;
+            }
             if (!state.getBoard().isEmpty(cellIndex)) {
                 System.out.println("Cell is already occupied. Choose another one.");
                 continue;
@@ -43,7 +50,13 @@ public final class HoneycombCLI {
 
         printBoard(state);
         System.out.printf("Final scores — Player 1: %d, Player 2: %d%n", state.getScore(true), state.getScore(false));
-        System.out.printf("Winner: Player %d%n", state.getScore(true) > state.getScore(false) ? 1 : 2);
+        int score1 = state.getScore(true);
+        int score2 = state.getScore(false);
+        if (score1 == score2) {
+            System.out.println("Result: draw");
+        } else {
+            System.out.printf("Winner: Player %d%n", score1 > score2 ? 1 : 2);
+        }
     }
 
     private static void printBoard(GameState state) {
@@ -55,8 +68,14 @@ public final class HoneycombCLI {
                 System.out.print("   ");
             }
             for (int col = 0; col <= row; col++) {
+                boolean blocked = Board.isBlockedCell(index);
                 boolean empty = board.isEmpty(index);
-                String label = empty ? String.format("%02d", index) : "XX";
+                String label;
+                if (blocked) {
+                    label = "##";
+                } else {
+                    label = empty ? String.format("%02d", index) : "XX";
+                }
                 System.out.print(label + " ");
                 index++;
             }

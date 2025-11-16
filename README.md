@@ -1,7 +1,8 @@
 # HoneyCombAI
 
 HoneyCombAI is a Java implementation of the Honeycomb board game. It provides a 55-cell
-bitboard model of the triangular arena, deterministic scoring for every possible line,
+bitboard model of the triangular arena (with three neutral corner cells blocked from play),
+deterministic scoring for every possible line,
 and an immutable game state that tracks turns and line completions. Future milestones
 expand the engine with Negamax search, transposition tables, training utilities, and
 visualisations.
@@ -37,4 +38,4 @@ gradle :honeycomb-core:run
 ```
 
 The `run` task launches `com.honeycomb.core.HoneycombCLI`, which guides two human
-players through all 55 moves while displaying the evolving score.
+players through all 52 playable moves while displaying the evolving score.

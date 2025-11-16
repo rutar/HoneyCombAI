@@ -9,11 +9,15 @@ import org.junit.jupiter.api.Test;
 class BoardTest {
 
     @Test
-    void emptyBoardHasNoBitsSet() {
+    void initialBoardHasBlockedCells() {
         Board board = new Board();
-        assertEquals(0, board.countBits());
+        assertEquals(Board.BLOCKED_CELL_COUNT, board.countBits());
         for (int i = 0; i < Board.CELL_COUNT; i++) {
-            assertTrue(board.isEmpty(i));
+            if (Board.isBlockedCell(i)) {
+                assertFalse(board.isEmpty(i));
+            } else {
+                assertTrue(board.isEmpty(i));
+            }
         }
     }
 
@@ -23,7 +27,7 @@ class BoardTest {
         Board updated = board.withCell(10);
         assertTrue(board.isEmpty(10));
         assertFalse(updated.isEmpty(10));
-        assertEquals(0, board.countBits());
-        assertEquals(1, updated.countBits());
+        assertEquals(Board.BLOCKED_CELL_COUNT, board.countBits());
+        assertEquals(Board.BLOCKED_CELL_COUNT + 1, updated.countBits());
     }
 }

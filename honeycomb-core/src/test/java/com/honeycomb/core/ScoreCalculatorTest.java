@@ -30,10 +30,11 @@ class ScoreCalculatorTest {
     @Test
     void completingLineAwardsPoint() {
         Board board = new Board();
+        board = board.withCell(1);
         long before = board.getBits();
-        Board after = board.withCell(0);
-        int delta = ScoreCalculator.calculateScoreDelta(before, after.getBits(), 0);
-        assertEquals(1, delta); // single-cell horizontal line
+        Board after = board.withCell(2);
+        int delta = ScoreCalculator.calculateScoreDelta(before, after.getBits(), 2);
+        assertEquals(2, delta); // completes the second row
     }
 
     private long maskForRow(int row) {
