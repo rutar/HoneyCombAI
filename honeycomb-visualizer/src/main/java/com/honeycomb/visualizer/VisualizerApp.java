@@ -31,6 +31,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Spinner;
@@ -40,6 +41,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.stage.Stage;
+import javafx.util.StringConverter;
 
 public final class VisualizerApp extends Application {
 
@@ -63,6 +65,7 @@ public final class VisualizerApp extends Application {
     private BoardView boardView;
     private StatsPane statsPane;
     private Spinner<Integer> depthSpinner;
+    private ComboBox<SearchConstraints.SearchMode> searchModeComboBox;
     private ProgressBar progressBar;
     private Label statusLabel;
     private Spinner<Integer> minThinkTimeSpinner;
@@ -210,6 +213,42 @@ public final class VisualizerApp extends Application {
         depthSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(1, MAX_DEPTH, DEFAULT_DEPTH));
         depthSpinner.setPrefWidth(80);
 
+        searchModeComboBox = new ComboBox<>();
+        searchModeComboBox.getItems().setAll(SearchConstraints.SearchMode.values());
+        searchModeComboBox.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(SearchConstraints.SearchMode mode) {
+                if (mode == null) {
+                    return "";
+                }
+                return switch (mode) {
+                    case SEQ -> "Sequential";
+                    case PAR -> "Parallel";
+                };
+            }
+
+            @Override
+            public SearchConstraints.SearchMode fromString(String string) {
+                if (string == null) {
+                    return null;
+                }
+                return switch (string.toLowerCase()) {
+                    case "sequential" -> SearchConstraints.SearchMode.SEQ;
+                    case "parallel" -> SearchConstraints.SearchMode.PAR;
+                    default -> null;
+                };
+            }
+        });
+        searchModeComboBox.setValue(searchMode);
+        searchModeComboBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue != null) {
+                searchMode = newValue;
+                if (ai != null) {
+                    ai.setMode(newValue);
+                }
+            }
+        });
+
         timeLimitSpinner = new Spinner<>();
         timeLimitSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(0, 60000,
                 (int) DEFAULT_TIME_LIMIT.toMillis(), 100));
@@ -241,6 +280,8 @@ public final class VisualizerApp extends Application {
                 simulateButton,
                 new Label("Depth:"),
                 depthSpinner,
+                new Label("Search mode:"),
+                searchModeComboBox,
                 new Label("Time limit (ms):"),
                 timeLimitSpinner,
                 new Label("Min. think time (ms):"),
@@ -264,6 +305,7 @@ public final class VisualizerApp extends Application {
         depthSpinner.disableProperty().bind(simulationRunning);
         timeLimitSpinner.disableProperty().bind(simulationRunning);
         minThinkTimeSpinner.disableProperty().bind(simulationRunning);
+        searchModeComboBox.disableProperty().bind(simulationRunning);
 
         return controls;
     }
