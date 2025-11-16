@@ -3,6 +3,7 @@ package com.honeycomb.core.ai;
 import com.honeycomb.core.Board;
 import com.honeycomb.core.GameState;
 import com.honeycomb.core.Symmetry;
+import com.honeycomb.core.ai.parallel.ForkJoinNegamax;
 import com.honeycomb.core.ai.state.SearchState;
 import java.time.Duration;
 import java.util.Objects;
@@ -25,6 +26,7 @@ public final class NegamaxAI implements Searcher {
     private final SearchState searchState;
     private final TranspositionTable transpositionTable;
     private final long minThinkTimeNanos;
+    private ForkJoinNegamax parallelSearcher;
 
     private long lastVisitedNodes;
     private boolean lastTimedOut;
@@ -135,12 +137,22 @@ public final class NegamaxAI implements Searcher {
         long timeLimitNanos = toTimeLimitNanos(constraints.timeLimit());
 
         SearchConstraints.SearchMode requestedMode = constraints.mode();
-        SearchResult result;
-        if (requestedMode == SearchConstraints.SearchMode.SEQ) {
-            result = sequentialSearch(state, boundedDepth, timeLimitNanos);
-        } else {
-            LOGGER.warning(() -> String.format("Mode %s is not yet implemented; falling back to SEQ", requestedMode));
-            result = sequentialSearch(state, boundedDepth, timeLimitNanos);
+        long searchStart = System.nanoTime();
+        long now = searchStart;
+        long deadlineNanos = timeLimitNanos == Long.MAX_VALUE ? Long.MAX_VALUE : saturatingAdd(now, timeLimitNanos);
+
+        SearchResult result = iterativeDeepening(state, boundedDepth, deadlineNanos, requestedMode);
+
+        if (!result.timedOut()) {
+            enforceMinimumThinkTime(searchStart);
+        }
+
+        if (!result.timedOut() && remainingMoves <= 1) {
+            transpositionTable.saveToDiskAsync().whenComplete((ignored, error) -> {
+                if (error != null) {
+                    LOGGER.log(Level.WARNING, "Failed to save transposition table", error);
+                }
+            });
         }
 
         lastVisitedNodes = result.visitedNodes();
@@ -153,19 +165,58 @@ public final class NegamaxAI implements Searcher {
         return nanos <= 0L ? 1L : nanos;
     }
 
-    private SearchResult sequentialSearch(GameState state, int boundedDepthLimit, long timeLimitNanos) {
+    private SearchResult iterativeDeepening(GameState state, int boundedDepthLimit, long deadlineNanos,
+            SearchConstraints.SearchMode mode) {
+        long totalVisited = 0L;
+        IterationResult lastComplete = null;
+        IterationResult lastAttempt = null;
+        boolean timedOutSearch = false;
+
+        for (int depth = 1; depth <= boundedDepthLimit; depth++) {
+            IterationResult iteration;
+            if (mode == SearchConstraints.SearchMode.SEQ) {
+                iteration = runSequentialIteration(state, depth, deadlineNanos);
+            } else {
+                iteration = runParallelIteration(state, depth, deadlineNanos);
+            }
+
+            lastAttempt = iteration;
+            totalVisited += iteration.visitedNodes;
+
+            if (iteration.timedOut) {
+                timedOutSearch = true;
+                break;
+            }
+
+            lastComplete = iteration;
+
+            if (deadlineNanos != Long.MAX_VALUE && System.nanoTime() >= deadlineNanos && depth < boundedDepthLimit) {
+                timedOutSearch = true;
+                break;
+            }
+        }
+
+        IterationResult finalResult = lastComplete != null ? lastComplete : lastAttempt;
+        if (finalResult == null) {
+            throw new IllegalStateException("Search did not evaluate any moves");
+        }
+
+        LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d, mode=%s)", totalVisited,
+                finalResult.depth, mode));
+
+        return new SearchResult(finalResult.move, finalResult.depth, totalVisited, timedOutSearch);
+    }
+
+    private IterationResult runSequentialIteration(GameState state, int boundedDepthLimit, long deadlineNanos) {
         searchState.reset(state);
         visitedNodes = 0L;
         timedOut = false;
-        long searchStart = System.nanoTime();
-        long now = searchStart;
-        deadline = timeLimitNanos == Long.MAX_VALUE ? Long.MAX_VALUE : saturatingAdd(now, timeLimitNanos);
+        deadline = deadlineNanos;
 
         long boardBits = searchState.currentBoard();
         long rootKey = computeKey(boardBits, searchState.isFirstPlayerTurn());
         TTEntry rootCached = transpositionTable.get(rootKey);
         int ttRootMove = rootCached != null ? rootCached.bestMove() : -1;
-        int remainingMoves = Board.CELL_COUNT - state.getBoard().countBits();
 
         int bestMove = -1;
         int bestScore = Integer.MIN_VALUE;
@@ -177,6 +228,11 @@ public final class NegamaxAI implements Searcher {
         int moveCount = searchState.generateMoves(ttRootMove);
 
         for (int i = 0; i < moveCount; i++) {
+            if (isDeadlineExceeded()) {
+                timedOut = true;
+                break;
+            }
+
             int move = searchState.moveAt(rootDepth, i);
             searchState.pushGenerated(rootDepth, i);
             int score = -negamax(boundedDepthLimit - 1, -beta, -alpha);
@@ -221,21 +277,7 @@ public final class NegamaxAI implements Searcher {
         long visitedNodes = this.visitedNodes;
         boolean timedOut = this.timedOut;
         final int usedDepth = boundedDepthLimit;
-        LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d)", visitedNodes, usedDepth));
-
-        if (!timedOut) {
-            enforceMinimumThinkTime(searchStart);
-        }
-
-        if (!timedOut && remainingMoves <= 1) {
-            transpositionTable.saveToDiskAsync().whenComplete((ignored, error) -> {
-                if (error != null) {
-                    LOGGER.log(Level.WARNING, "Failed to save transposition table", error);
-                }
-            });
-        }
-
-        return new SearchResult(bestMove, usedDepth, visitedNodes, timedOut);
+        return new IterationResult(bestMove, usedDepth, visitedNodes, timedOut);
     }
 
     private long saturatingAdd(long a, long b) {
@@ -333,6 +375,11 @@ public final class NegamaxAI implements Searcher {
             }
             searchState.pop();
 
+            if (isDeadlineExceeded()) {
+                timedOut = true;
+                break;
+            }
+
             if (score > bestValue) {
                 bestValue = score;
                 bestMove = move;
@@ -378,5 +425,23 @@ public final class NegamaxAI implements Searcher {
 
     private boolean isDeadlineExceeded() {
         return timedOut || (deadline != Long.MAX_VALUE && System.nanoTime() >= deadline);
+    }
+
+    private IterationResult runParallelIteration(GameState state, int depthLimit, long deadlineNanos) {
+        long remaining = deadlineNanos == Long.MAX_VALUE ? Long.MAX_VALUE : Math.max(0L, deadlineNanos - System.nanoTime());
+        Duration iterationLimit = remaining == Long.MAX_VALUE ? Duration.ZERO : Duration.ofNanos(Math.max(1L, remaining));
+        SearchResult result = getParallelSearcher().search(state,
+                new SearchConstraints(depthLimit, iterationLimit, SearchConstraints.SearchMode.PAR));
+        return new IterationResult(result.move(), depthLimit, result.visitedNodes(), result.timedOut());
+    }
+
+    private ForkJoinNegamax getParallelSearcher() {
+        if (parallelSearcher == null) {
+            parallelSearcher = new ForkJoinNegamax();
+        }
+        return parallelSearcher;
+    }
+
+    private record IterationResult(int move, int depth, long visitedNodes, boolean timedOut) {
     }
 }

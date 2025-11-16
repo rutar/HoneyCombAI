@@ -113,7 +113,7 @@ class NegamaxAITest {
     }
 
     @Test
-    void fallsBackToSequentialModeWhenParallelRequested() {
+    void supportsParallelModeExecution() {
         NegamaxAI ai = new NegamaxAI(2, Duration.ofMillis(10));
         GameState state = new GameState();
 
@@ -122,5 +122,6 @@ class NegamaxAITest {
 
         assertTrue(result.move() >= 0 && result.move() < Board.CELL_COUNT,
                 "Search should return a legal move when parallel mode is requested");
+        assertTrue(result.depthEvaluated() >= 1, "Parallel search should evaluate at least depth 1");
     }
 }

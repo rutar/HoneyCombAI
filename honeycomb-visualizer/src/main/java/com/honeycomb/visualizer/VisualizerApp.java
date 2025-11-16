@@ -10,6 +10,8 @@ import com.honeycomb.visualizer.ui.BoardView;
 import com.honeycomb.visualizer.ui.StatsPane;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javafx.animation.KeyFrame;
@@ -65,6 +67,7 @@ public final class VisualizerApp extends Application {
     private Label statusLabel;
     private Spinner<Integer> minThinkTimeSpinner;
     private Spinner<Integer> timeLimitSpinner;
+    private CompletableFuture<List<GameFrame>> simulationFuture;
 
     public static void main(String[] args) {
         launch(args);
@@ -333,35 +336,12 @@ public final class VisualizerApp extends Application {
         progressBar.progressProperty().bind(task.progressProperty());
         statusLabel.textProperty().bind(task.messageProperty());
 
-        task.setOnSucceeded(event -> {
-            cleanupTaskBindings();
-            List<GameFrame> result = task.getValue();
-            frames.setAll(result);
-            if (!frames.isEmpty()) {
-                currentIndex.set(0);
-                currentFrame.set(frames.get(0));
-            } else {
-                currentIndex.set(0);
-                currentFrame.set(null);
+        simulationFuture = attachSimulationHandlers(task);
+        simulationFuture.whenComplete((result, error) -> {
+            if (error != null && !(error instanceof InterruptedException)
+                    && !(error instanceof CancellationException)) {
+                LOGGER.log(Level.FINE, "Simulation completed with error", error);
             }
-            progressBar.setProgress(1.0);
-            statusLabel.setText("Готово");
-        });
-
-        task.setOnFailed(event -> {
-            cleanupTaskBindings();
-            Throwable error = task.getException();
-            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
-            statusLabel.setText(error == null ? "Ошибка" : "Ошибка: " + error.getMessage());
-            if (error != null) {
-                error.printStackTrace();
-            }
-        });
-
-        task.setOnCancelled(event -> {
-            cleanupTaskBindings();
-            progressBar.setProgress(0);
-            statusLabel.setText("Отменено");
         });
 
         Thread thread = new Thread(task, "honeycomb-visualizer-simulation");
@@ -386,10 +366,51 @@ public final class VisualizerApp extends Application {
     }
 
 
+    private CompletableFuture<List<GameFrame>> attachSimulationHandlers(TrainingSimulationTask task) {
+        CompletableFuture<List<GameFrame>> completion = new CompletableFuture<>();
+        task.setOnSucceeded(event -> {
+            cleanupTaskBindings();
+            List<GameFrame> result = task.getValue();
+            frames.setAll(result);
+            if (!frames.isEmpty()) {
+                currentIndex.set(0);
+                currentFrame.set(frames.get(0));
+            } else {
+                currentIndex.set(0);
+                currentFrame.set(null);
+            }
+            progressBar.setProgress(1.0);
+            statusLabel.setText("Готово");
+            completion.complete(result);
+        });
+
+        task.setOnFailed(event -> {
+            cleanupTaskBindings();
+            Throwable error = task.getException();
+            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+            statusLabel.setText(error == null ? "Ошибка" : "Ошибка: " + error.getMessage());
+            if (error != null) {
+                LOGGER.log(Level.SEVERE, "Simulation failed", error);
+                completion.completeExceptionally(error);
+            } else {
+                completion.completeExceptionally(new IllegalStateException("Неизвестная ошибка симуляции"));
+            }
+        });
+
+        task.setOnCancelled(event -> {
+            cleanupTaskBindings();
+            progressBar.setProgress(0);
+            statusLabel.setText("Отменено");
+            completion.cancel(false);
+        });
+        return completion;
+    }
+
     private void cleanupTaskBindings() {
         simulationRunning.set(false);
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
+        simulationFuture = null;
     }
 
     private void configureSearchMode(List<String> args) {
