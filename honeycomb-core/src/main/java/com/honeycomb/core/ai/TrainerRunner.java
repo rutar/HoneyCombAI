@@ -29,6 +29,7 @@ public final class TrainerRunner {
             int scheduledDepth = maxDepth;
             long minThinkMillis = 0L;
             Path tablePath = null;
+            boolean tracePvs = false;
 
             int index = 3;
             if (index < args.length && !args[index].startsWith("--")) {
@@ -46,6 +47,8 @@ public final class TrainerRunner {
                         throw new IllegalArgumentException("Table path specified more than once");
                     }
                     tablePath = Paths.get(option.substring("--table=".length()));
+                } else if ("--tracePVS".equals(option)) {
+                    tracePvs = true;
                 } else if (tablePath == null) {
                     tablePath = Paths.get(option);
                 } else {
@@ -63,6 +66,7 @@ public final class TrainerRunner {
 
             Trainer trainer = new Trainer(table, maxDepth, Duration.ofMillis(timeLimitMillis),
                     Duration.ofMillis(minThinkMillis), Trainer.DepthScheduler.constant(scheduledDepth));
+            trainer.setTracePvsEnabled(tracePvs);
             trainer.playGames(gameCount);
         } catch (NumberFormatException ex) {
             LOGGER.log(Level.SEVERE, "Failed to parse arguments", ex);
@@ -75,6 +79,6 @@ public final class TrainerRunner {
     private static void printUsage() {
         System.err.println(
                 "Usage: TrainerRunner <gameCount> <maxDepth> <timeLimitMillis> [depthOverride] "
-                        + "[--minThinkMillis=<value>] [--table=<path>|tablePath]");
+                        + "[--minThinkMillis=<value>] [--table=<path>|tablePath] [--tracePVS]");
     }
 }

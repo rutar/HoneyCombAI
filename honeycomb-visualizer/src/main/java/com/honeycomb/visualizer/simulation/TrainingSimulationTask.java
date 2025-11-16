@@ -90,6 +90,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
                     secondBits,
                     result.visitedNodes(),
                     result.timedOut(),
+                    result.telemetry(),
                     table.getLastUpdate(),
                     table.size(),
                     state.getMoveNumber());

@@ -144,6 +144,7 @@ public final class VisualizerApp extends Application {
                 frame.secondPlayerBits(),
                 frame.visitedNodes(),
                 frame.timedOut(),
+                frame.telemetry(),
                 transpositionTable.getLastUpdate(),
                 transpositionTable.size(),
                 frame.ply());

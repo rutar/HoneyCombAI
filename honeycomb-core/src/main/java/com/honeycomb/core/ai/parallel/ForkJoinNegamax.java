@@ -6,6 +6,7 @@ import com.honeycomb.core.ai.SearchConstraints;
 import com.honeycomb.core.ai.SearchConstraints.SearchMode;
 import com.honeycomb.core.ai.SearchResult;
 import com.honeycomb.core.ai.Searcher;
+import com.honeycomb.core.ai.SearchTelemetry;
 import com.honeycomb.core.ai.state.SearchState;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -15,6 +16,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.RecursiveTask;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -90,6 +92,7 @@ public final class ForkJoinNegamax implements Searcher {
 
         RootTask rootTask = new RootTask(rootBits, rootFirst, rootFirstScore, rootSecondScore, boundedDepth, context);
         RootResult result = pool.invoke(rootTask);
+        long elapsedNanos = System.nanoTime() - searchStart;
 
         long visitedNodes = context.visitedNodes();
         boolean timedOut = context.wasAborted();
@@ -106,7 +109,10 @@ public final class ForkJoinNegamax implements Searcher {
 
         stopRequested.set(false);
 
-        return new SearchResult(bestMove, depthEvaluated, visitedNodes, timedOut);
+        SearchTelemetry.Iteration iteration = new SearchTelemetry.Iteration(depthEvaluated, visitedNodes,
+                context.cutoffs(), 0L, 0L, context.pvReSearches(), context.maxActiveTasks(), elapsedNanos, List.of());
+        SearchTelemetry telemetry = new SearchTelemetry(List.of(iteration));
+        return new SearchResult(bestMove, depthEvaluated, visitedNodes, timedOut, telemetry);
     }
 
     private long toTimeLimitNanos(Duration timeLimit) {
@@ -150,6 +156,9 @@ public final class ForkJoinNegamax implements Searcher {
         alpha = Math.max(alpha, score);
 
         if (context.shouldAbort() || moveCount == 1 || alpha >= beta) {
+            if (alpha >= beta) {
+                context.recordCutoff();
+            }
             return new RootResult(bestMove, bestScore);
         }
 
@@ -166,23 +175,25 @@ public final class ForkJoinNegamax implements Searcher {
             state.pushGenerated(rootDepth, i);
             int probe = -searchImpl(state, depth - 1, -alpha - 1, -alpha, false, context);
             state.pop();
-                int candidate = probe;
-                if (candidate > alpha) {
-                    state.pushGenerated(rootDepth, i);
-                    candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
-                    state.pop();
-                }
+            int candidate = probe;
+            if (candidate > alpha) {
+                state.pushGenerated(rootDepth, i);
+                context.recordPvResearch();
+                candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
+                state.pop();
+            }
                 if (candidate > bestScore) {
                     bestScore = candidate;
                     bestMove = move;
                 }
-                if (candidate > alpha) {
-                    alpha = candidate;
-                }
-                if (alpha >= beta) {
-                    break;
-                }
+            if (candidate > alpha) {
+                alpha = candidate;
             }
+            if (alpha >= beta) {
+                context.recordCutoff();
+                break;
+            }
+        }
             return new RootResult(bestMove, bestScore);
         }
 
@@ -222,6 +233,7 @@ public final class ForkJoinNegamax implements Searcher {
             int candidate = probe;
             if (candidate > alpha) {
                 state.pushGenerated(rootDepth, childTask.moveIndex);
+                context.recordPvResearch();
                 candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
                 state.pop();
             }
@@ -234,6 +246,7 @@ public final class ForkJoinNegamax implements Searcher {
                 alpha = candidate;
             }
             if (alpha >= beta) {
+                context.recordCutoff();
                 cutoff = true;
             }
         }
@@ -286,6 +299,7 @@ public final class ForkJoinNegamax implements Searcher {
                         int candidate = probe;
                         if (candidate > alpha) {
                             state.pushGenerated(currentPly, i);
+                            context.recordPvResearch();
                             candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
                             state.pop();
                         }
@@ -296,6 +310,7 @@ public final class ForkJoinNegamax implements Searcher {
                             alpha = candidate;
                         }
                         if (alpha >= beta) {
+                            context.recordCutoff();
                             break;
                         }
                     }
@@ -340,6 +355,7 @@ public final class ForkJoinNegamax implements Searcher {
                         int candidate = probe;
                         if (candidate > alpha) {
                             state.pushGenerated(currentPly, childTask.moveIndex);
+                            context.recordPvResearch();
                             candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
                             state.pop();
                         }
@@ -350,6 +366,7 @@ public final class ForkJoinNegamax implements Searcher {
                             alpha = candidate;
                         }
                         if (alpha >= beta) {
+                            context.recordCutoff();
                             cutoff = true;
                         }
                     }
@@ -379,6 +396,7 @@ public final class ForkJoinNegamax implements Searcher {
                 alpha = score;
             }
             if (alpha >= beta) {
+                context.recordCutoff();
                 break;
             }
         }
@@ -411,7 +429,12 @@ public final class ForkJoinNegamax implements Searcher {
 
         @Override
         protected RootResult compute() {
-            return searchRoot(boardBits, firstToMove, firstScore, secondScore, depth, context);
+            context.taskStarted();
+            try {
+                return searchRoot(boardBits, firstToMove, firstScore, secondScore, depth, context);
+            } finally {
+                context.taskFinished();
+            }
         }
     }
 
@@ -442,9 +465,14 @@ public final class ForkJoinNegamax implements Searcher {
 
         @Override
         protected Integer compute() {
-            SearchState state = context.acquireState();
-            state.initialize(boardBits, firstToMove, firstScore, secondScore);
-            return searchImpl(state, depth, alpha, beta, pvNode, context);
+            context.taskStarted();
+            try {
+                SearchState state = context.acquireState();
+                state.initialize(boardBits, firstToMove, firstScore, secondScore);
+                return searchImpl(state, depth, alpha, beta, pvNode, context);
+            } finally {
+                context.taskFinished();
+            }
         }
     }
 
@@ -486,6 +514,10 @@ public final class ForkJoinNegamax implements Searcher {
         private final AtomicBoolean stopFlag;
         private final boolean enableParallelSplits;
         private final AtomicLong visitedNodes = new AtomicLong();
+        private final AtomicLong cutoffs = new AtomicLong();
+        private final AtomicLong pvReSearches = new AtomicLong();
+        private final AtomicInteger activeTasks = new AtomicInteger();
+        private final AtomicLong maxActiveTasks = new AtomicLong();
         private final ThreadLocal<SearchState> states = ThreadLocal.withInitial(SearchState::new);
         private volatile boolean aborted;
 
@@ -516,6 +548,35 @@ public final class ForkJoinNegamax implements Searcher {
 
         private long visitedNodes() {
             return visitedNodes.get();
+        }
+
+        private void recordCutoff() {
+            cutoffs.incrementAndGet();
+        }
+
+        private long cutoffs() {
+            return cutoffs.get();
+        }
+
+        private void recordPvResearch() {
+            pvReSearches.incrementAndGet();
+        }
+
+        private long pvReSearches() {
+            return pvReSearches.get();
+        }
+
+        private void taskStarted() {
+            int current = activeTasks.incrementAndGet();
+            maxActiveTasks.accumulateAndGet(current, Math::max);
+        }
+
+        private void taskFinished() {
+            activeTasks.decrementAndGet();
+        }
+
+        private long maxActiveTasks() {
+            return maxActiveTasks.get();
         }
 
         private boolean wasAborted() {

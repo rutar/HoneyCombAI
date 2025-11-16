@@ -59,6 +59,10 @@ public final class Trainer {
         }
     }
 
+    public void setTracePvsEnabled(boolean enabled) {
+        ai.setTracePvsEnabled(enabled);
+    }
+
     private void playSingleGame(int gameIndex) {
         int requestedDepth = depthScheduler.depthForGame(gameIndex);
         if (requestedDepth < 1) {
