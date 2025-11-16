@@ -3,7 +3,9 @@ package com.honeycomb.visualizer.ui;
 import com.honeycomb.core.Board;
 import com.honeycomb.core.ScoreCalculator;
 import com.honeycomb.visualizer.model.GameFrame;
+import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
+import javafx.geometry.VPos;
 import javafx.scene.Group;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
@@ -13,6 +15,10 @@ import javafx.scene.shape.Line;
 import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Shape;
 import javafx.scene.shape.StrokeLineCap;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextBoundsType;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -39,9 +45,11 @@ public final class BoardView extends Pane {
     private static final double DEFAULT_STROKE_WIDTH = 1.0;
     private static final double LINE_THICKNESS = 6.0;
     private static final long FULL_BOARD_MASK = -1L >>> (64 - Board.CELL_COUNT);
+    private static final long INITIAL_BOARD_BITS = new Board().getBits();
     private static final long[] LINE_MASKS = ScoreCalculator.getLineMasks();
 
     private final Polygon[] cells = new Polygon[Board.CELL_COUNT];
+    private final Text[] cellLabels = new Text[Board.CELL_COUNT];
     private final double[] centerX = new double[Board.CELL_COUNT];
     private final double[] centerY = new double[Board.CELL_COUNT];
     private final Shape[] lineOverlays = new Shape[ScoreCalculator.TOTAL_LINES];
@@ -112,6 +120,8 @@ public final class BoardView extends Pane {
             centerY[i] += offsetY;
         }
 
+        createCellLabels();
+
         lineGroup = new Group();
         lineGroup.setMouseTransparent(true);
         boardGroup.getChildren().add(lineGroup);
@@ -141,6 +151,7 @@ public final class BoardView extends Pane {
                     cell.setStrokeWidth(DEFAULT_STROKE_WIDTH);
                 }
             }
+            updateCellLabelVisibility(INITIAL_BOARD_BITS);
             resetLineState();
             lastMoveMarker.setVisible(false);
             return;
@@ -175,6 +186,7 @@ public final class BoardView extends Pane {
             cell.setStrokeWidth(DEFAULT_STROKE_WIDTH);
         }
 
+        updateCellLabelVisibility(boardBits);
         updateLineOverlays(frame, firstBits, secondBits, boardBits);
         updateLastMoveMarker(hasLastMove, lastMove);
 
@@ -191,6 +203,46 @@ public final class BoardView extends Pane {
         double offsetX = insets.getLeft() + (availableWidth - contentWidth) / 2.0;
         double offsetY = insets.getTop() + (availableHeight - contentHeight) / 2.0;
         boardGroup.relocate(offsetX, offsetY);
+    }
+
+    private void createCellLabels() {
+        Font labelFont = Font.font("Consolas", FontWeight.BOLD, 12);
+        for (int i = 0; i < Board.CELL_COUNT; i++) {
+            if (cells[i] == null || Board.isBlockedCell(i)) {
+                continue;
+            }
+
+            Text label = new Text(String.format("%02d", i));
+            label.setFill(Color.web("#3C486B"));
+            label.setFont(labelFont);
+            label.setBoundsType(TextBoundsType.VISUAL);
+            label.setTextOrigin(VPos.CENTER);
+            label.setManaged(false);
+            label.setMouseTransparent(true);
+            positionLabel(label, centerX[i], centerY[i]);
+            label.setVisible(true);
+            boardGroup.getChildren().add(label);
+            cellLabels[i] = label;
+        }
+    }
+
+    private void positionLabel(Text label, double x, double y) {
+        Bounds bounds = label.getBoundsInLocal();
+        double centeredX = x - (bounds.getWidth() / 2.0) - bounds.getMinX();
+        double centeredY = y - (bounds.getHeight() / 2.0) - bounds.getMinY();
+        label.setLayoutX(centeredX);
+        label.setLayoutY(centeredY);
+    }
+
+    private void updateCellLabelVisibility(long boardBits) {
+        for (int i = 0; i < cellLabels.length; i++) {
+            Text label = cellLabels[i];
+            if (label == null) {
+                continue;
+            }
+            boolean occupied = ((boardBits >>> i) & 1L) != 0L;
+            label.setVisible(!occupied && !Board.isBlockedCell(i));
+        }
     }
 
     private static Polygon createHexagon(double centerX, double centerY, double size) {
