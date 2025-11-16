@@ -40,48 +40,48 @@ public final class StatsPane extends VBox {
     private final Label ttValueValue = valueLabel();
     private final Label ttStatusIndicator = statusIndicator();
     private final Label ttStatusText = statusTextLabel();
-    private final Tooltip ttStatusTooltip = new Tooltip("Транспозиционная таблица не загружена");
+    private final Tooltip ttStatusTooltip = new Tooltip("Transposition table is not loaded");
 
     public StatsPane() {
         setPadding(new Insets(16));
         setSpacing(12);
         setStyle("-fx-background-color: rgba(255,255,255,0.85); -fx-border-color: #d0d6e6; -fx-border-radius: 6; -fx-background-radius: 6;");
-        setPrefWidth(308);
-        setMinWidth(308);
-        setMaxWidth(308);
+        setPrefWidth(370);
+        setMinWidth(370);
+        setMaxWidth(370);
 
-        Label title = new Label("Статистика");
+        Label title = new Label("Statistics");
         title.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(8);
 
-        addRow(grid, 0, "Ход", moveValue);
-        addRow(grid, 1, "Ходит", turnValue);
-        addRow(grid, 2, "Последний ход", lastMoveValue);
-        addRow(grid, 3, "Счет", scoreValue);
-        addRow(grid, 4, "Посещено узлов", nodesValue);
-        addRow(grid, 5, "Таймаут", timeoutValue);
+        addRow(grid, 0, "Move", moveValue);
+        addRow(grid, 1, "Turn", turnValue);
+        addRow(grid, 2, "Last move", lastMoveValue);
+        addRow(grid, 3, "Score", scoreValue);
+        addRow(grid, 4, "Visited nodes", nodesValue);
+        addRow(grid, 5, "Timeout", timeoutValue);
         HBox ttStatusRow = new HBox(6, ttStatusIndicator, ttStatusText);
         ttStatusRow.setAlignment(Pos.CENTER_LEFT);
         HBox ttEntriesRow = new HBox(ttSizeValue);
         ttEntriesRow.setAlignment(Pos.CENTER_LEFT);
         ttStatusIndicator.setTooltip(ttStatusTooltip);
-        addRow(grid, 6, "Время поиска", searchTimeValue);
-        addRow(grid, 7, "Отсечения", cutoffsValue);
-        addRow(grid, 8, "PV перезапуски", pvResearchValue);
-        addRow(grid, 9, "TT попадания", ttHitsValue);
-        addRow(grid, 10, "TT сохранения", ttStoresValue);
-        addRow(grid, 11, "Макс. задачи", tasksValue);
-        addRow(grid, 12, "Основная вариация", pvLineValue);
-        addRow(grid, 13, "TT статус", ttStatusRow);
-        addRow(grid, 14, "TT записи", ttEntriesRow);
-        addRow(grid, 15, "TT глубина", ttDepthValue);
-        addRow(grid, 16, "TT предыдущая глубина", ttPreviousDepthValue);
-        addRow(grid, 17, "TT оценка", ttValueValue);
-        addRow(grid, 18, "TT флаг", ttFlagValue);
-        addRow(grid, 19, "TT изменение", ttChangeValue);
+        addRow(grid, 6, "Search time", searchTimeValue);
+        addRow(grid, 7, "Cutoffs", cutoffsValue);
+        addRow(grid, 8, "PV re-searches", pvResearchValue);
+        addRow(grid, 9, "TT hits", ttHitsValue);
+        addRow(grid, 10, "TT stores", ttStoresValue);
+        addRow(grid, 11, "Max tasks", tasksValue);
+        addRow(grid, 12, "Principal variation", pvLineValue);
+        addRow(grid, 13, "TT status", ttStatusRow);
+        addRow(grid, 14, "TT entries", ttEntriesRow);
+        addRow(grid, 15, "TT depth", ttDepthValue);
+        addRow(grid, 16, "TT previous depth", ttPreviousDepthValue);
+        addRow(grid, 17, "TT value", ttValueValue);
+        addRow(grid, 18, "TT flag", ttFlagValue);
+        addRow(grid, 19, "TT change", ttChangeValue);
 
         getChildren().addAll(title, grid);
     }
@@ -111,10 +111,10 @@ public final class StatsPane extends VBox {
         }
 
         moveValue.setText(String.valueOf(frame.ply()));
-        turnValue.setText(frame.state().getBoard().isFirstPlayer() ? "Первый" : "Второй");
+        turnValue.setText(frame.state().getBoard().isFirstPlayer() ? "First" : "Second");
         if (frame.hasLastMove()) {
             boolean lastByFirst = !frame.state().getBoard().isFirstPlayer();
-            lastMoveValue.setText(String.format("%d (%s)", frame.lastMove(), lastByFirst ? "первый" : "второй"));
+            lastMoveValue.setText(String.format("%d (%s)", frame.lastMove(), lastByFirst ? "first" : "second"));
         } else {
             lastMoveValue.setText("—");
         }
@@ -123,7 +123,7 @@ public final class StatsPane extends VBox {
         if (latest != null) {
             nodesValue.setText(latest.nodes() > 0 ? Long.toString(latest.nodes()) : "—");
             searchTimeValue.setText(latest.elapsedNanos() > 0
-                    ? String.format("%.1f мс", latest.elapsedMillis())
+                    ? String.format("%.1f ms", latest.elapsedMillis())
                     : "—");
             cutoffsValue.setText(Long.toString(latest.cutoffs()));
             pvResearchValue.setText(Long.toString(latest.pvReSearches()));
@@ -141,7 +141,7 @@ public final class StatsPane extends VBox {
             tasksValue.setText("—");
             pvLineValue.setText("—");
         }
-        timeoutValue.setText(frame.timedOut() ? "Да" : "Нет");
+        timeoutValue.setText(frame.timedOut() ? "Yes" : "No");
         ttSizeValue.setText(Integer.toString(frame.tableSize()));
 
         var event = frame.tableEvent();
@@ -154,7 +154,7 @@ public final class StatsPane extends VBox {
         } else {
             ttDepthValue.setText(Integer.toString(event.entry().depth()));
             ttFlagValue.setText(event.entry().flag().name());
-            ttChangeValue.setText(String.format("%016X (%s)", event.key(), event.replaced() ? "обновлен" : "без изм."));
+            ttChangeValue.setText(String.format("%016X (%s)", event.key(), event.replaced() ? "updated" : "unchanged"));
             ttPreviousDepthValue.setText(event.previousEntry() == null ? "—" : Integer.toString(event.previousEntry().depth()));
             ttValueValue.setText(Integer.toString(event.entry().value()));
         }
@@ -178,27 +178,27 @@ public final class StatsPane extends VBox {
         switch (value) {
             case READY -> {
                 color = "#5cb85c";
-                description = "Транспозиционная таблица загружена";
-                shortDescription = "загружена";
+                description = "Transposition table loaded";
+                shortDescription = "loaded";
             }
             case LOADING, SAVING -> {
                 color = "#f0ad4e";
                 description = value == TranspositionTable.PersistenceStatus.LOADING
-                        ? "Транспозиционная таблица загружается"
-                        : "Транспозиционная таблица сохраняется";
+                        ? "Transposition table loading"
+                        : "Transposition table saving";
                 shortDescription = value == TranspositionTable.PersistenceStatus.LOADING
-                        ? "загрузка"
-                        : "сохранение";
+                        ? "loading"
+                        : "saving";
             }
             case NOT_LOADED -> {
                 color = "#d9534f";
-                description = "Транспозиционная таблица не загружена";
-                shortDescription = "не загружена";
+                description = "Transposition table not loaded";
+                shortDescription = "not loaded";
             }
             default -> {
                 color = "#d9534f";
-                description = "Состояние таблицы неизвестно";
-                shortDescription = "неизвестно";
+                description = "Transposition table status unknown";
+                shortDescription = "unknown";
             }
         }
         ttStatusIndicator.setStyle("-fx-font-size: 16px; -fx-text-fill: " + color + ";");
@@ -241,7 +241,7 @@ public final class StatsPane extends VBox {
     }
 
     private static Label statusTextLabel() {
-        Label label = new Label("(не загружена)");
+        Label label = new Label("(not loaded)");
         label.setStyle("-fx-font-size: 14px; -fx-text-fill: #4a4f64;");
         label.setFocusTraversable(false);
         return label;
