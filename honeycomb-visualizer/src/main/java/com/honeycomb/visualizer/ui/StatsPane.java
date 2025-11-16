@@ -1,5 +1,6 @@
 package com.honeycomb.visualizer.ui;
 
+import com.honeycomb.core.ai.SearchTelemetry;
 import com.honeycomb.core.ai.TranspositionTable;
 import com.honeycomb.visualizer.model.GameFrame;
 import javafx.beans.value.ObservableValue;
@@ -11,6 +12,7 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import java.util.List;
 
 /**
  * Displays aggregated information about the current simulation frame.
@@ -23,6 +25,13 @@ public final class StatsPane extends VBox {
     private final Label scoreValue = valueLabel();
     private final Label nodesValue = valueLabel();
     private final Label timeoutValue = valueLabel();
+    private final Label searchTimeValue = valueLabel();
+    private final Label cutoffsValue = valueLabel();
+    private final Label pvResearchValue = valueLabel();
+    private final Label ttHitsValue = valueLabel();
+    private final Label ttStoresValue = valueLabel();
+    private final Label tasksValue = valueLabel();
+    private final Label pvLineValue = valueLabel();
     private final Label ttSizeValue = valueLabel();
     private final Label ttDepthValue = valueLabel();
     private final Label ttFlagValue = valueLabel();
@@ -59,13 +68,20 @@ public final class StatsPane extends VBox {
         HBox ttEntriesRow = new HBox(ttSizeValue);
         ttEntriesRow.setAlignment(Pos.CENTER_LEFT);
         ttStatusIndicator.setTooltip(ttStatusTooltip);
-        addRow(grid, 6, "TT статус", ttStatusRow);
-        addRow(grid, 7, "TT записи", ttEntriesRow);
-        addRow(grid, 8, "TT глубина", ttDepthValue);
-        addRow(grid, 9, "TT предыдущая глубина", ttPreviousDepthValue);
-        addRow(grid, 10, "TT оценка", ttValueValue);
-        addRow(grid, 11, "TT флаг", ttFlagValue);
-        addRow(grid, 12, "TT изменение", ttChangeValue);
+        addRow(grid, 6, "Время поиска", searchTimeValue);
+        addRow(grid, 7, "Отсечения", cutoffsValue);
+        addRow(grid, 8, "PV перезапуски", pvResearchValue);
+        addRow(grid, 9, "TT попадания", ttHitsValue);
+        addRow(grid, 10, "TT сохранения", ttStoresValue);
+        addRow(grid, 11, "Макс. задачи", tasksValue);
+        addRow(grid, 12, "Основная вариация", pvLineValue);
+        addRow(grid, 13, "TT статус", ttStatusRow);
+        addRow(grid, 14, "TT записи", ttEntriesRow);
+        addRow(grid, 15, "TT глубина", ttDepthValue);
+        addRow(grid, 16, "TT предыдущая глубина", ttPreviousDepthValue);
+        addRow(grid, 17, "TT оценка", ttValueValue);
+        addRow(grid, 18, "TT флаг", ttFlagValue);
+        addRow(grid, 19, "TT изменение", ttChangeValue);
 
         getChildren().addAll(title, grid);
     }
@@ -78,6 +94,13 @@ public final class StatsPane extends VBox {
             scoreValue.setText("—");
             nodesValue.setText("—");
             timeoutValue.setText("—");
+            searchTimeValue.setText("—");
+            cutoffsValue.setText("—");
+            pvResearchValue.setText("—");
+            ttHitsValue.setText("—");
+            ttStoresValue.setText("—");
+            tasksValue.setText("—");
+            pvLineValue.setText("—");
             ttSizeValue.setText("—");
             ttDepthValue.setText("—");
             ttFlagValue.setText("—");
@@ -96,7 +119,28 @@ public final class StatsPane extends VBox {
             lastMoveValue.setText("—");
         }
         scoreValue.setText(String.format("%d : %d", frame.state().getScore(true), frame.state().getScore(false)));
-        nodesValue.setText(frame.visitedNodes() > 0 ? Long.toString(frame.visitedNodes()) : "—");
+        SearchTelemetry.Iteration latest = frame.telemetry() == null ? null : frame.telemetry().latest();
+        if (latest != null) {
+            nodesValue.setText(latest.nodes() > 0 ? Long.toString(latest.nodes()) : "—");
+            searchTimeValue.setText(latest.elapsedNanos() > 0
+                    ? String.format("%.1f мс", latest.elapsedMillis())
+                    : "—");
+            cutoffsValue.setText(Long.toString(latest.cutoffs()));
+            pvResearchValue.setText(Long.toString(latest.pvReSearches()));
+            ttHitsValue.setText(Long.toString(latest.transpositionHits()));
+            ttStoresValue.setText(Long.toString(latest.transpositionStores()));
+            tasksValue.setText(latest.maxActiveTasks() > 0 ? Long.toString(latest.maxActiveTasks()) : "—");
+            pvLineValue.setText(formatPvLine(latest.principalVariation()));
+        } else {
+            nodesValue.setText(frame.visitedNodes() > 0 ? Long.toString(frame.visitedNodes()) : "—");
+            searchTimeValue.setText("—");
+            cutoffsValue.setText("—");
+            pvResearchValue.setText("—");
+            ttHitsValue.setText("—");
+            ttStoresValue.setText("—");
+            tasksValue.setText("—");
+            pvLineValue.setText("—");
+        }
         timeoutValue.setText(frame.timedOut() ? "Да" : "Нет");
         ttSizeValue.setText(Integer.toString(frame.tableSize()));
 
@@ -167,6 +211,20 @@ public final class StatsPane extends VBox {
         Label caption = new Label(label + ":");
         caption.setStyle("-fx-text-fill: #4a4f64; -fx-font-weight: 600;");
         grid.addRow(row, caption, value);
+    }
+
+    private static String formatPvLine(List<Integer> pv) {
+        if (pv == null || pv.isEmpty()) {
+            return "—";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < pv.size(); i++) {
+            if (i > 0) {
+                builder.append(" → ");
+            }
+            builder.append(pv.get(i));
+        }
+        return builder.toString();
     }
 
     private static Label valueLabel() {

@@ -6,6 +6,8 @@ import com.honeycomb.core.Symmetry;
 import com.honeycomb.core.ai.parallel.ForkJoinNegamax;
 import com.honeycomb.core.ai.state.SearchState;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.locks.LockSupport;
@@ -27,6 +29,8 @@ public final class NegamaxAI implements Searcher {
     private final TranspositionTable transpositionTable;
     private final long minThinkTimeNanos;
     private ForkJoinNegamax parallelSearcher;
+    private boolean tracePrincipalVariation;
+    private IterationCounters iterationCounters;
 
     private long lastVisitedNodes;
     private boolean lastTimedOut;
@@ -94,6 +98,10 @@ public final class NegamaxAI implements Searcher {
 
     public void setMode(SearchConstraints.SearchMode mode) {
         this.mode = Objects.requireNonNull(mode, "mode");
+    }
+
+    public void setTracePvsEnabled(boolean enabled) {
+        this.tracePrincipalVariation = enabled;
     }
 
     public int findBestMove(GameState state) {
@@ -171,6 +179,7 @@ public final class NegamaxAI implements Searcher {
         IterationResult lastComplete = null;
         IterationResult lastAttempt = null;
         boolean timedOutSearch = false;
+        List<SearchTelemetry.Iteration> iterationTelemetry = new ArrayList<>();
 
         for (int depth = 1; depth <= boundedDepthLimit; depth++) {
             IterationResult iteration;
@@ -182,6 +191,12 @@ public final class NegamaxAI implements Searcher {
 
             lastAttempt = iteration;
             totalVisited += iteration.visitedNodes;
+            if (iteration.telemetry != null) {
+                iterationTelemetry.add(iteration.telemetry);
+                if (tracePrincipalVariation) {
+                    traceIteration(iteration);
+                }
+            }
 
             if (iteration.timedOut) {
                 timedOutSearch = true;
@@ -204,7 +219,8 @@ public final class NegamaxAI implements Searcher {
         LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d, mode=%s)", totalVisited,
                 finalResult.depth, mode));
 
-        return new SearchResult(finalResult.move, finalResult.depth, totalVisited, timedOutSearch);
+        SearchTelemetry telemetry = new SearchTelemetry(iterationTelemetry);
+        return new SearchResult(finalResult.move, finalResult.depth, totalVisited, timedOutSearch, telemetry);
     }
 
     private IterationResult runSequentialIteration(GameState state, int boundedDepthLimit, long deadlineNanos) {
@@ -212,6 +228,8 @@ public final class NegamaxAI implements Searcher {
         visitedNodes = 0L;
         timedOut = false;
         deadline = deadlineNanos;
+        IterationCounters counters = new IterationCounters(boundedDepthLimit);
+        iterationCounters = counters;
 
         long boardBits = searchState.currentBoard();
         long rootKey = computeKey(boardBits, searchState.isFirstPlayerTurn());
@@ -251,6 +269,7 @@ public final class NegamaxAI implements Searcher {
                 alpha = score;
             }
             if (alpha >= beta) {
+                recordCutoff();
                 break;
             }
         }
@@ -272,12 +291,16 @@ public final class NegamaxAI implements Searcher {
                 flag = TTFlag.EXACT;
             }
             transpositionTable.put(rootKey, new TTEntry(bestScore, boundedDepthLimit, flag, bestMove));
+            recordTranspositionStore();
         }
 
         long visitedNodes = this.visitedNodes;
         boolean timedOut = this.timedOut;
         final int usedDepth = boundedDepthLimit;
-        return new IterationResult(bestMove, usedDepth, visitedNodes, timedOut);
+        List<Integer> pvLine = extractPrincipalVariation(state, boundedDepthLimit);
+        SearchTelemetry.Iteration telemetry = counters.snapshot(pvLine);
+        iterationCounters = null;
+        return new IterationResult(bestMove, usedDepth, visitedNodes, timedOut, telemetry);
     }
 
     private long saturatingAdd(long a, long b) {
@@ -307,6 +330,7 @@ public final class NegamaxAI implements Searcher {
         }
 
         visitedNodes++;
+        recordNodeVisit();
 
         long boardBits = searchState.currentBoard();
         long key = computeKey(boardBits, searchState.isFirstPlayerTurn());
@@ -314,6 +338,9 @@ public final class NegamaxAI implements Searcher {
         int originalBeta = beta;
         TTEntry cached = transpositionTable.get(key);
         int ttBestMove = cached != null ? cached.bestMove() : -1;
+        if (cached != null) {
+            recordTranspositionHit();
+        }
         if (cached != null && cached.depth() >= depth) {
             switch (cached.flag()) {
                 case EXACT:
@@ -336,6 +363,7 @@ public final class NegamaxAI implements Searcher {
             int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
             if (!timedOut) {
                 transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT, -1));
+                recordTranspositionStore();
             }
             return evaluation;
         }
@@ -346,6 +374,7 @@ public final class NegamaxAI implements Searcher {
             int evaluation = searchState.evaluateCurrent(SCORE_WEIGHT);
             if (!timedOut) {
                 transpositionTable.put(key, new TTEntry(evaluation, Math.max(0, depth), TTFlag.EXACT, -1));
+                recordTranspositionStore();
             }
             return evaluation;
         }
@@ -368,6 +397,7 @@ public final class NegamaxAI implements Searcher {
                 int reducedDepth = Math.max(0, depth - 1 - reduction);
                 score = -negamax(reducedDepth, -alpha - 1, -alpha);
                 if (score > alpha) {
+                    recordPvResearch();
                     score = -negamax(depth - 1, -beta, -alpha);
                 }
             } else {
@@ -392,6 +422,7 @@ public final class NegamaxAI implements Searcher {
                 alpha = score;
             }
             if (alpha >= beta) {
+                recordCutoff();
                 break;
             }
         }
@@ -413,6 +444,7 @@ public final class NegamaxAI implements Searcher {
                 flag = TTFlag.EXACT;
             }
             transpositionTable.put(key, new TTEntry(bestValue, depth, flag, bestMove));
+            recordTranspositionStore();
         }
         return bestValue;
     }
@@ -432,7 +464,12 @@ public final class NegamaxAI implements Searcher {
         Duration iterationLimit = remaining == Long.MAX_VALUE ? Duration.ZERO : Duration.ofNanos(Math.max(1L, remaining));
         SearchResult result = getParallelSearcher().search(state,
                 new SearchConstraints(depthLimit, iterationLimit, SearchConstraints.SearchMode.PAR));
-        return new IterationResult(result.move(), depthLimit, result.visitedNodes(), result.timedOut());
+        SearchTelemetry.Iteration telemetry = result.telemetry().latest();
+        if (telemetry == null) {
+            telemetry = new SearchTelemetry.Iteration(depthLimit, result.visitedNodes(), 0L, 0L, 0L, 0L,
+                    result.telemetry().maxActiveTasks(), 0L, List.of());
+        }
+        return new IterationResult(result.move(), depthLimit, result.visitedNodes(), result.timedOut(), telemetry);
     }
 
     private ForkJoinNegamax getParallelSearcher() {
@@ -442,6 +479,132 @@ public final class NegamaxAI implements Searcher {
         return parallelSearcher;
     }
 
-    private record IterationResult(int move, int depth, long visitedNodes, boolean timedOut) {
+    private void traceIteration(IterationResult iteration) {
+        if (!tracePrincipalVariation) {
+            return;
+        }
+        SearchTelemetry.Iteration telemetry = iteration.telemetry;
+        if (telemetry == null) {
+            return;
+        }
+        String pvLine = formatPvLine(telemetry.principalVariation());
+        double millis = telemetry.elapsedMillis();
+        long nodes = telemetry.nodes();
+        long cutoffs = telemetry.cutoffs();
+        long ttHits = telemetry.transpositionHits();
+        LOGGER.info(() -> String.format(
+                "PVS depth=%d move=%d time=%.2f ms nodes=%d cutoffs=%d ttHits=%d pv=%s",
+                iteration.depth, iteration.move, millis, nodes, cutoffs, ttHits, pvLine));
+    }
+
+    private static String formatPvLine(List<Integer> pv) {
+        if (pv == null || pv.isEmpty()) {
+            return "—";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < pv.size(); i++) {
+            if (i > 0) {
+                builder.append(" → ");
+            }
+            builder.append(pv.get(i));
+        }
+        return builder.toString();
+    }
+
+    private List<Integer> extractPrincipalVariation(GameState rootState, int maxDepth) {
+        List<Integer> pv = new ArrayList<>();
+        GameState current = rootState;
+        for (int depth = 0; depth < maxDepth && !current.isGameOver(); depth++) {
+            long boardBits = current.getBoard().getBits();
+            boolean firstTurn = current.getBoard().isFirstPlayer();
+            long key = computeKey(boardBits, firstTurn);
+            TTEntry entry = transpositionTable.get(key);
+            if (entry == null) {
+                break;
+            }
+            int move = entry.bestMove();
+            if (move < 0 || !current.getBoard().isEmpty(move)) {
+                break;
+            }
+            pv.add(move);
+            current = current.applyMove(move);
+        }
+        return pv;
+    }
+
+    private void recordNodeVisit() {
+        if (iterationCounters != null) {
+            iterationCounters.recordNode();
+        }
+    }
+
+    private void recordCutoff() {
+        if (iterationCounters != null) {
+            iterationCounters.recordCutoff();
+        }
+    }
+
+    private void recordTranspositionHit() {
+        if (iterationCounters != null) {
+            iterationCounters.recordTranspositionHit();
+        }
+    }
+
+    private void recordTranspositionStore() {
+        if (iterationCounters != null) {
+            iterationCounters.recordTranspositionStore();
+        }
+    }
+
+    private void recordPvResearch() {
+        if (iterationCounters != null) {
+            iterationCounters.recordPvResearch();
+        }
+    }
+
+    private static final class IterationCounters {
+        private final int depth;
+        private final long startNanos;
+        private long nodes;
+        private long cutoffs;
+        private long ttHits;
+        private long ttStores;
+        private long pvReSearches;
+
+        private IterationCounters(int depth) {
+            this.depth = depth;
+            this.startNanos = System.nanoTime();
+        }
+
+        private void recordNode() {
+            nodes++;
+        }
+
+        private void recordCutoff() {
+            cutoffs++;
+        }
+
+        private void recordTranspositionHit() {
+            ttHits++;
+        }
+
+        private void recordTranspositionStore() {
+            ttStores++;
+        }
+
+        private void recordPvResearch() {
+            pvReSearches++;
+        }
+
+        private SearchTelemetry.Iteration snapshot(List<Integer> pvLine) {
+            long elapsed = System.nanoTime() - startNanos;
+            List<Integer> principalVariation = pvLine == null ? List.of() : List.copyOf(pvLine);
+            return new SearchTelemetry.Iteration(depth, nodes, cutoffs, ttHits, ttStores, pvReSearches, 1L, elapsed,
+                    principalVariation);
+        }
+    }
+
+    private record IterationResult(int move, int depth, long visitedNodes, boolean timedOut,
+            SearchTelemetry.Iteration telemetry) {
     }
 }
