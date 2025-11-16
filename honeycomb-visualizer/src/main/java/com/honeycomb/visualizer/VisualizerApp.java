@@ -177,7 +177,7 @@ public final class VisualizerApp extends Application {
 
 
     private HBox buildControls() {
-        Button simulateButton = new Button("Сыграть партию");
+        Button simulateButton = new Button("Run simulation");
         simulateButton.setOnAction(event -> runSimulation(depthSpinner.getValue()));
 
         Button previousButton = new Button("⏮");
@@ -225,7 +225,7 @@ public final class VisualizerApp extends Application {
         progressBar = new ProgressBar(0);
         progressBar.setPrefWidth(180);
 
-        statusLabel = new Label("Готово");
+        statusLabel = new Label("Ready");
         statusLabel.setMinWidth(160);
 
         Region spacer = new Region();
@@ -239,11 +239,11 @@ public final class VisualizerApp extends Application {
 
         HBox controls = new HBox(12,
                 simulateButton,
-                new Label("Глубина:"),
+                new Label("Depth:"),
                 depthSpinner,
-                new Label("Лимит времени (мс):"),
+                new Label("Time limit (ms):"),
                 timeLimitSpinner,
-                new Label("Мин. время (мс):"),
+                new Label("Min. think time (ms):"),
                 minThinkTimeSpinner,
                 navigation,
                 spacer,
@@ -382,7 +382,7 @@ public final class VisualizerApp extends Application {
                 currentFrame.set(null);
             }
             progressBar.setProgress(1.0);
-            statusLabel.setText("Готово");
+            statusLabel.setText("Ready");
             completion.complete(result);
         });
 
@@ -390,19 +390,19 @@ public final class VisualizerApp extends Application {
             cleanupTaskBindings();
             Throwable error = task.getException();
             progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
-            statusLabel.setText(error == null ? "Ошибка" : "Ошибка: " + error.getMessage());
+            statusLabel.setText(error == null ? "Error" : "Error: " + error.getMessage());
             if (error != null) {
                 LOGGER.log(Level.SEVERE, "Simulation failed", error);
                 completion.completeExceptionally(error);
             } else {
-                completion.completeExceptionally(new IllegalStateException("Неизвестная ошибка симуляции"));
+                completion.completeExceptionally(new IllegalStateException("Unknown simulation error"));
             }
         });
 
         task.setOnCancelled(event -> {
             cleanupTaskBindings();
             progressBar.setProgress(0);
-            statusLabel.setText("Отменено");
+            statusLabel.setText("Cancelled");
             completion.cancel(false);
         });
         return completion;

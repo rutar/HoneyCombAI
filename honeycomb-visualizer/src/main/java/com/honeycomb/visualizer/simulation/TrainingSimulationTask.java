@@ -52,7 +52,7 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
             throw new IllegalStateException("Search must not run on the JavaFX application thread");
         }
 
-        updateMessage("Подготовка...");
+        updateMessage("Preparing...");
         updateProgress(0, Board.PLAYABLE_CELL_COUNT);
 
         List<GameFrame> frames = new ArrayList<>();
@@ -63,12 +63,12 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
 
         while (!state.isGameOver()) {
             if (isCancelled()) {
-                updateMessage("Остановлено");
+                updateMessage("Stopped");
                 return frames;
             }
 
             int moveNumber = state.getMoveNumber() + 1;
-            updateMessage(String.format("Поиск хода %d", moveNumber));
+            updateMessage(String.format("Searching move %d", moveNumber));
             updateProgress(state.getMoveNumber(), Board.PLAYABLE_CELL_COUNT);
 
             boolean firstToMove = state.getBoard().isFirstPlayer();
@@ -97,11 +97,11 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
             frames.add(frame);
             publishFrame(frame);
             updateProgress(state.getMoveNumber(), Board.PLAYABLE_CELL_COUNT);
-            updateMessage(String.format("Ход %d найден", moveNumber));
+            updateMessage(String.format("Move %d found", moveNumber));
         }
 
         updateProgress(Board.PLAYABLE_CELL_COUNT, Board.PLAYABLE_CELL_COUNT);
-        updateMessage("Симуляция завершена");
+        updateMessage("Simulation complete");
         return frames;
     }
 
