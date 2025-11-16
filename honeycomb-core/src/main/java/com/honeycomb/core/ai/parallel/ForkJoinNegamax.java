@@ -9,6 +9,7 @@ import com.honeycomb.core.ai.Searcher;
 import com.honeycomb.core.ai.SearchTelemetry;
 import com.honeycomb.core.ai.state.SearchState;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -131,131 +132,132 @@ public final class ForkJoinNegamax implements Searcher {
     private RootResult searchRoot(long boardBits, boolean firstToMove, int firstScore, int secondScore, int depth,
             SearchContext context) {
         SearchState state = context.acquireState();
-        state.initialize(boardBits, firstToMove, firstScore, secondScore);
+        try {
+            state.initialize(boardBits, firstToMove, firstScore, secondScore);
 
-        int rootDepth = state.ply();
-        int moveCount = state.generateMoves();
-        if (moveCount == 0) {
-            return new RootResult(-1, Integer.MIN_VALUE);
-        }
-
-        if (context.shouldAbort()) {
-            return new RootResult(-1, Integer.MIN_VALUE);
-        }
-
-        int alpha = Integer.MIN_VALUE / 2;
-        int beta = Integer.MAX_VALUE / 2;
-        int bestMove = -1;
-        int bestScore = Integer.MIN_VALUE;
-
-        state.pushGenerated(rootDepth, 0);
-        int score = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
-        state.pop();
-        bestScore = score;
-        bestMove = state.moveAt(rootDepth, 0);
-        alpha = Math.max(alpha, score);
-
-        if (context.shouldAbort() || moveCount == 1 || alpha >= beta) {
-            if (alpha >= beta) {
-                context.recordCutoff();
+            int rootDepth = state.ply();
+            int moveCount = state.generateMoves();
+            if (moveCount == 0) {
+                return new RootResult(-1, Integer.MIN_VALUE);
             }
-            return new RootResult(bestMove, bestScore);
-        }
 
-        if (!context.enableParallelSplits) {
+            if (context.shouldAbort()) {
+                return new RootResult(-1, Integer.MIN_VALUE);
+            }
+
+            int alpha = Integer.MIN_VALUE / 2;
+            int beta = Integer.MAX_VALUE / 2;
+            int bestMove = -1;
+            int bestScore = Integer.MIN_VALUE;
+
+            state.pushGenerated(rootDepth, 0);
+            int score = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
+            state.pop();
+            bestScore = score;
+            bestMove = state.moveAt(rootDepth, 0);
+            alpha = Math.max(alpha, score);
+
+            if (context.shouldAbort() || moveCount == 1 || alpha >= beta) {
+                if (alpha >= beta) {
+                    context.recordCutoff();
+                }
+                return new RootResult(bestMove, bestScore);
+            }
+
+            if (!context.enableParallelSplits) {
+                for (int i = 1; i < moveCount; i++) {
+                    if (context.shouldAbort()) {
+                        break;
+                    }
+
+                    int move = state.moveAt(rootDepth, i);
+                    state.pushGenerated(rootDepth, i);
+                    int probe = -searchImpl(state, depth - 1, -alpha - 1, -alpha, false, context);
+                    state.pop();
+                    int candidate = probe;
+                    if (candidate > alpha) {
+                        state.pushGenerated(rootDepth, i);
+                        context.recordPvResearch();
+                        candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
+                        state.pop();
+                    }
+                    if (candidate > bestScore) {
+                        bestScore = candidate;
+                        bestMove = move;
+                    }
+                    if (candidate > alpha) {
+                        alpha = candidate;
+                    }
+                    if (alpha >= beta) {
+                        context.recordCutoff();
+                        break;
+                    }
+                }
+                return new RootResult(bestMove, bestScore);
+            }
+
+            List<ChildTask> siblingTasks = new ArrayList<>(moveCount - 1);
             for (int i = 1; i < moveCount; i++) {
                 if (context.shouldAbort()) {
                     break;
                 }
-            if (context.shouldAbort()) {
-                break;
+                int move = state.moveAt(rootDepth, i);
+                long childBits = boardBits | (1L << move);
+                int delta = state.moveDeltaAt(rootDepth, i);
+                int childFirstScore = firstScore + (firstToMove ? delta : 0);
+                int childSecondScore = secondScore + (firstToMove ? 0 : delta);
+                SearchComputeTask task = new SearchComputeTask(childBits, !firstToMove, childFirstScore,
+                        childSecondScore, depth - 1, -alpha - 1, -alpha, false, context);
+                if (context.shouldAbort()) {
+                    break;
+                }
+                siblingTasks.add(new ChildTask(move, i, task));
+                task.fork();
             }
 
-            int move = state.moveAt(rootDepth, i);
-            state.pushGenerated(rootDepth, i);
-            int probe = -searchImpl(state, depth - 1, -alpha - 1, -alpha, false, context);
-            state.pop();
-            int candidate = probe;
-            if (candidate > alpha) {
-                state.pushGenerated(rootDepth, i);
-                context.recordPvResearch();
-                candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
-                state.pop();
-            }
+            boolean cutoff = false;
+            for (ChildTask childTask : siblingTasks) {
+                if (cutoff || context.shouldAbort()) {
+                    childTask.cancel();
+                    continue;
+                }
+
+                int probe;
+                try {
+                    probe = -childTask.task.join();
+                } catch (CancellationException ex) {
+                    continue;
+                }
+
+                int candidate = probe;
+                if (candidate > alpha) {
+                    state.pushGenerated(rootDepth, childTask.moveIndex);
+                    context.recordPvResearch();
+                    candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
+                    state.pop();
+                }
+
                 if (candidate > bestScore) {
                     bestScore = candidate;
-                    bestMove = move;
+                    bestMove = childTask.move;
                 }
-            if (candidate > alpha) {
-                alpha = candidate;
+                if (candidate > alpha) {
+                    alpha = candidate;
+                }
+                if (alpha >= beta) {
+                    context.recordCutoff();
+                    cutoff = true;
+                }
             }
-            if (alpha >= beta) {
-                context.recordCutoff();
-                break;
-            }
-        }
-            return new RootResult(bestMove, bestScore);
-        }
 
-        List<ChildTask> siblingTasks = new ArrayList<>(moveCount - 1);
-        for (int i = 1; i < moveCount; i++) {
-            if (context.shouldAbort()) {
-                break;
-            }
-            int move = state.moveAt(rootDepth, i);
-            long childBits = boardBits | (1L << move);
-            int delta = state.moveDeltaAt(rootDepth, i);
-            int childFirstScore = firstScore + (firstToMove ? delta : 0);
-            int childSecondScore = secondScore + (firstToMove ? 0 : delta);
-            SearchComputeTask task = new SearchComputeTask(childBits, !firstToMove, childFirstScore, childSecondScore,
-                    depth - 1, -alpha - 1, -alpha, false, context);
-            if (context.shouldAbort()) {
-                break;
-            }
-            siblingTasks.add(new ChildTask(move, i, task));
-            task.fork();
-        }
-
-        boolean cutoff = false;
-        for (ChildTask childTask : siblingTasks) {
-            if (cutoff || context.shouldAbort()) {
+            for (ChildTask childTask : siblingTasks) {
                 childTask.cancel();
-                continue;
             }
 
-            int probe;
-            try {
-                probe = -childTask.task.join();
-            } catch (CancellationException ex) {
-                continue;
-            }
-
-            int candidate = probe;
-            if (candidate > alpha) {
-                state.pushGenerated(rootDepth, childTask.moveIndex);
-                context.recordPvResearch();
-                candidate = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
-                state.pop();
-            }
-
-            if (candidate > bestScore) {
-                bestScore = candidate;
-                bestMove = childTask.move;
-            }
-            if (candidate > alpha) {
-                alpha = candidate;
-            }
-            if (alpha >= beta) {
-                context.recordCutoff();
-                cutoff = true;
-            }
+            return new RootResult(bestMove, bestScore);
+        } finally {
+            context.releaseState(state);
         }
-
-        for (ChildTask childTask : siblingTasks) {
-            childTask.cancel();
-        }
-
-        return new RootResult(bestMove, bestScore);
     }
 
     private int searchImpl(SearchState state, int depth, int alpha, int beta, boolean pvNode, SearchContext context) {
@@ -466,11 +468,12 @@ public final class ForkJoinNegamax implements Searcher {
         @Override
         protected Integer compute() {
             context.taskStarted();
+            SearchState state = context.acquireState();
             try {
-                SearchState state = context.acquireState();
                 state.initialize(boardBits, firstToMove, firstScore, secondScore);
                 return searchImpl(state, depth, alpha, beta, pvNode, context);
             } finally {
+                context.releaseState(state);
                 context.taskFinished();
             }
         }
@@ -518,7 +521,7 @@ public final class ForkJoinNegamax implements Searcher {
         private final AtomicLong pvReSearches = new AtomicLong();
         private final AtomicInteger activeTasks = new AtomicInteger();
         private final AtomicLong maxActiveTasks = new AtomicLong();
-        private final ThreadLocal<SearchState> states = ThreadLocal.withInitial(SearchState::new);
+        private final ThreadLocal<ArrayDeque<SearchState>> states = ThreadLocal.withInitial(ArrayDeque::new);
         private volatile boolean aborted;
 
         private SearchContext(long deadline, AtomicBoolean stopFlag, SearchMode mode) {
@@ -584,7 +587,19 @@ public final class ForkJoinNegamax implements Searcher {
         }
 
         private SearchState acquireState() {
-            return states.get();
+            ArrayDeque<SearchState> pool = states.get();
+            SearchState state = pool.pollFirst();
+            if (state == null) {
+                state = new SearchState();
+            }
+            return state;
+        }
+
+        private void releaseState(SearchState state) {
+            if (state == null) {
+                return;
+            }
+            states.get().offerFirst(state);
         }
     }
 }
