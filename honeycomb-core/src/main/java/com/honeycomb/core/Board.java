@@ -8,15 +8,29 @@ package com.honeycomb.core;
 public final class Board {
 
     public static final int CELL_COUNT = 55;
+    public static final int[] BLOCKED_CELLS = {0, 45, 54};
+    public static final int BLOCKED_CELL_COUNT = BLOCKED_CELLS.length;
+    public static final int PLAYABLE_CELL_COUNT = CELL_COUNT - BLOCKED_CELL_COUNT;
+
+    private static final long BLOCKED_CELLS_MASK;
+
+    static {
+        long mask = 0L;
+        for (int cell : BLOCKED_CELLS) {
+            mask |= 1L << cell;
+        }
+        BLOCKED_CELLS_MASK = mask;
+    }
 
     private final long bits;
     private final boolean firstPlayer; // true = first player's turn, false = second player's turn
 
     /**
-     * Creates an empty board with the first player to move.
+     * Creates the initial board with neutral corner cells marked as unavailable and the first
+     * player to move.
      */
     public Board() {
-        this(0L, true);
+        this(BLOCKED_CELLS_MASK, true);
     }
 
     private Board(long bits, boolean firstPlayer) {
@@ -73,6 +87,14 @@ public final class Board {
      */
     public boolean isFirstPlayer() {
         return firstPlayer;
+    }
+
+    /**
+     * Returns {@code true} if the provided cell index is one of the neutral blocked cells.
+     */
+    public static boolean isBlockedCell(int index) {
+        checkIndex(index);
+        return (BLOCKED_CELLS_MASK & (1L << index)) != 0;
     }
 
     private static void checkIndex(int index) {
