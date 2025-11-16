@@ -42,6 +42,16 @@ public final class TrainingSimulationTask extends Task<List<GameFrame>> {
 
     @Override
     protected List<GameFrame> call() {
+        boolean onFxThread;
+        try {
+            onFxThread = Platform.isFxApplicationThread();
+        } catch (IllegalStateException ex) {
+            onFxThread = false;
+        }
+        if (onFxThread) {
+            throw new IllegalStateException("Search must not run on the JavaFX application thread");
+        }
+
         updateMessage("Подготовка...");
         updateProgress(0, Board.CELL_COUNT);
 

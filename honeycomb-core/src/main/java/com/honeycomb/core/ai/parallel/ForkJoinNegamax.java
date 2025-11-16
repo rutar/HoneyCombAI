@@ -133,6 +133,10 @@ public final class ForkJoinNegamax implements Searcher {
             return new RootResult(-1, Integer.MIN_VALUE);
         }
 
+        if (context.shouldAbort()) {
+            return new RootResult(-1, Integer.MIN_VALUE);
+        }
+
         int alpha = Integer.MIN_VALUE / 2;
         int beta = Integer.MAX_VALUE / 2;
         int bestMove = -1;
@@ -154,10 +158,14 @@ public final class ForkJoinNegamax implements Searcher {
                 if (context.shouldAbort()) {
                     break;
                 }
-                int move = state.moveAt(rootDepth, i);
-                state.pushGenerated(rootDepth, i);
-                int probe = -searchImpl(state, depth - 1, -alpha - 1, -alpha, false, context);
-                state.pop();
+            if (context.shouldAbort()) {
+                break;
+            }
+
+            int move = state.moveAt(rootDepth, i);
+            state.pushGenerated(rootDepth, i);
+            int probe = -searchImpl(state, depth - 1, -alpha - 1, -alpha, false, context);
+            state.pop();
                 int candidate = probe;
                 if (candidate > alpha) {
                     state.pushGenerated(rootDepth, i);
@@ -180,6 +188,9 @@ public final class ForkJoinNegamax implements Searcher {
 
         List<ChildTask> siblingTasks = new ArrayList<>(moveCount - 1);
         for (int i = 1; i < moveCount; i++) {
+            if (context.shouldAbort()) {
+                break;
+            }
             int move = state.moveAt(rootDepth, i);
             long childBits = boardBits | (1L << move);
             int delta = state.moveDeltaAt(rootDepth, i);
@@ -187,6 +198,9 @@ public final class ForkJoinNegamax implements Searcher {
             int childSecondScore = secondScore + (firstToMove ? 0 : delta);
             SearchComputeTask task = new SearchComputeTask(childBits, !firstToMove, childFirstScore, childSecondScore,
                     depth - 1, -alpha - 1, -alpha, false, context);
+            if (context.shouldAbort()) {
+                break;
+            }
             siblingTasks.add(new ChildTask(move, i, task));
             task.fork();
         }
@@ -251,6 +265,9 @@ public final class ForkJoinNegamax implements Searcher {
         int bestValue = Integer.MIN_VALUE;
 
         if (pvNode && moveCount > 0) {
+            if (context.shouldAbort()) {
+                return bestValue == Integer.MIN_VALUE ? evaluate(state) : bestValue;
+            }
             state.pushGenerated(currentPly, 0);
             int score = -searchImpl(state, depth - 1, -beta, -alpha, true, context);
             state.pop();
@@ -289,6 +306,9 @@ public final class ForkJoinNegamax implements Searcher {
                     int firstScore = state.firstScore(currentPly);
                     int secondScore = state.secondScore(currentPly);
                     for (int i = 1; i < moveCount; i++) {
+                        if (context.shouldAbort()) {
+                            break;
+                        }
                         int move = state.moveAt(currentPly, i);
                         long childBits = boardBits | (1L << move);
                         int delta = state.moveDeltaAt(currentPly, i);
@@ -296,6 +316,9 @@ public final class ForkJoinNegamax implements Searcher {
                         int childSecondScore = secondScore + (firstToMove ? 0 : delta);
                         SearchComputeTask task = new SearchComputeTask(childBits, !firstToMove, childFirstScore,
                                 childSecondScore, depth - 1, -alpha - 1, -alpha, false, context);
+                        if (context.shouldAbort()) {
+                            break;
+                        }
                         siblingTasks.add(new ChildTask(move, i, task));
                         task.fork();
                     }
@@ -340,6 +363,9 @@ public final class ForkJoinNegamax implements Searcher {
         }
 
         for (int i = 0; i < moveCount; i++) {
+            if (context.shouldAbort()) {
+                break;
+            }
             state.pushGenerated(currentPly, i);
             int score = -searchImpl(state, depth - 1, -beta, -alpha, pvNode, context);
             state.pop();
