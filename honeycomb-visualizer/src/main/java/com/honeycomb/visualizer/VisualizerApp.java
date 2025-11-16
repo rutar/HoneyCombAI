@@ -373,8 +373,9 @@ public final class VisualizerApp extends Application {
             List<GameFrame> result = task.getValue();
             frames.setAll(result);
             if (!frames.isEmpty()) {
-                currentIndex.set(0);
-                currentFrame.set(frames.get(0));
+                int lastIndex = frames.size() - 1;
+                currentIndex.set(lastIndex);
+                currentFrame.set(frames.get(lastIndex));
             } else {
                 currentIndex.set(0);
                 currentFrame.set(null);
