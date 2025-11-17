@@ -216,7 +216,8 @@ public final class NegamaxAI implements Searcher {
             throw new IllegalStateException("Search did not evaluate any moves");
         }
 
-        LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d, mode=%s)", totalVisited,
+        long finalTotalVisited = totalVisited;
+        LOGGER.info(() -> String.format("Negamax explored %d nodes (depth=%d, mode=%s)", finalTotalVisited,
                 finalResult.depth, mode));
 
         SearchTelemetry telemetry = new SearchTelemetry(iterationTelemetry);
