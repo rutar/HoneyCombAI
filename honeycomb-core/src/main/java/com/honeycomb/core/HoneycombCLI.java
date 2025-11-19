@@ -1,6 +1,5 @@
 package com.honeycomb.core;
 
-import java.util.Arrays;
 import java.util.Scanner;
 
 /**
@@ -16,9 +15,10 @@ public final class HoneycombCLI {
         GameState state = new GameState();
 
         System.out.println("Honeycomb — console edition");
-        System.out.printf("Neutral corner cells %s are blocked and unavailable.%n",
-                Arrays.toString(Board.BLOCKED_CELLS));
+        System.out.printf("Neutral corner cell %d is blocked and unavailable.%n",
+                state.getBoard().getBlockedCell());
         while (!state.isGameOver()) {
+            Board board = state.getBoard();
             printBoard(state);
             System.out.printf("Scores — Player 1: %d, Player 2: %d%n", state.getScore(true), state.getScore(false));
             System.out.printf("Player %d, choose a cell (0-54): ", (state.getBoard().isFirstPlayer() ? 1 : 0) + 1);
@@ -36,7 +36,7 @@ public final class HoneycombCLI {
                 System.out.println("Cell index must be between 0 and 54.");
                 continue;
             }
-            if (Board.isBlockedCell(cellIndex)) {
+            if (board.isBlockedCell(cellIndex)) {
                 System.out.println("This cell is blocked by the board rules. Choose another one.");
                 continue;
             }
@@ -68,7 +68,7 @@ public final class HoneycombCLI {
                 System.out.print("   ");
             }
             for (int col = 0; col <= row; col++) {
-                boolean blocked = Board.isBlockedCell(index);
+                boolean blocked = board.isBlockedCell(index);
                 boolean empty = board.isEmpty(index);
                 String label;
                 if (blocked) {

@@ -10,10 +10,10 @@ class BoardTest {
 
     @Test
     void initialBoardHasBlockedCells() {
-        Board board = new Board();
+        Board board = new Board(0);
         assertEquals(Board.BLOCKED_CELL_COUNT, board.countBits());
         for (int i = 0; i < Board.CELL_COUNT; i++) {
-            if (Board.isBlockedCell(i)) {
+            if (board.isBlockedCell(i)) {
                 assertFalse(board.isEmpty(i));
             } else {
                 assertTrue(board.isEmpty(i));
@@ -23,7 +23,7 @@ class BoardTest {
 
     @Test
     void withCellSetsBit() {
-        Board board = new Board();
+        Board board = new Board(0);
         Board updated = board.withCell(10);
         assertTrue(board.isEmpty(10));
         assertFalse(updated.isEmpty(10));

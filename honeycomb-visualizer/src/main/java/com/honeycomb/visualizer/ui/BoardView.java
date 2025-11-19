@@ -45,7 +45,7 @@ public final class BoardView extends Pane {
     private static final double DEFAULT_STROKE_WIDTH = 1.0;
     private static final double LINE_THICKNESS = 6.0;
     private static final long FULL_BOARD_MASK = -1L >>> (64 - Board.CELL_COUNT);
-    private static final long INITIAL_BOARD_BITS = new Board().getBits();
+    private static final long INITIAL_BOARD_BITS = 0L;
     private static final long[] LINE_MASKS = ScoreCalculator.getLineMasks();
 
     private final Polygon[] cells = new Polygon[Board.CELL_COUNT];
@@ -208,7 +208,7 @@ public final class BoardView extends Pane {
     private void createCellLabels() {
         Font labelFont = Font.font("Consolas", FontWeight.BOLD, 12);
         for (int i = 0; i < Board.CELL_COUNT; i++) {
-            if (cells[i] == null || Board.isBlockedCell(i)) {
+            if (cells[i] == null) {
                 continue;
             }
 
@@ -241,7 +241,7 @@ public final class BoardView extends Pane {
                 continue;
             }
             boolean occupied = ((boardBits >>> i) & 1L) != 0L;
-            label.setVisible(!occupied && !Board.isBlockedCell(i));
+            label.setVisible(!occupied);
         }
     }
 

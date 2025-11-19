@@ -19,6 +19,13 @@ public final class GameState {
         this(new Board(), 0, 0);
     }
 
+    /**
+     * Creates the initial game state with the specified blocked corner cell.
+     */
+    public GameState(int blockedCellIndex) {
+        this(new Board(blockedCellIndex), 0, 0);
+    }
+
     private GameState(Board board, int scoresFirstPlayer, int scoresSecondPlayer) {
         this.board = board;
         this.scoresFirstPlayer = scoresFirstPlayer;
