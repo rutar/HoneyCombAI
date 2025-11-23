@@ -101,6 +101,9 @@ public final class VisualizerApp extends Application {
     private Spinner<Integer> timeLimitSpinner;
     private Button startGameButton;
     private Button stopGameButton;
+    private Button restartGameButton;
+    private Button resignButton;
+    private Button backToSimulationButton;
     private Label scoreLabel;
     private Label lastMoveLabel;
     private Label moveNumberLabel;
@@ -236,6 +239,15 @@ public final class VisualizerApp extends Application {
         stopGameButton = new Button("Stop game");
         stopGameButton.setOnAction(event -> stopMatch());
 
+        restartGameButton = new Button("Restart game");
+        restartGameButton.setOnAction(event -> restartMatch());
+
+        resignButton = new Button("Resign");
+        resignButton.setOnAction(event -> resignMatch());
+
+        backToSimulationButton = new Button("Back to simulation");
+        backToSimulationButton.setOnAction(event -> returnToSimulationMode());
+
         Button previousButton = new Button("⏮");
         previousButton.setOnAction(event -> {
             pausePlayback();
@@ -341,6 +353,9 @@ public final class VisualizerApp extends Application {
                 simulateButton,
                 startGameButton,
                 stopGameButton,
+                restartGameButton,
+                resignButton,
+                backToSimulationButton,
                 new Label("Depth:"),
                 depthSpinner,
                 new Label("Search mode:"),
@@ -372,6 +387,9 @@ public final class VisualizerApp extends Application {
         simulateButton.disableProperty().bind(simulationRunning.or(tableReady.not()).or(matchRunning));
         startGameButton.disableProperty().bind(simulationRunning.or(tableReady.not()).or(matchRunning));
         stopGameButton.disableProperty().bind(matchRunning.not());
+        restartGameButton.disableProperty().bind(matchRunning.not());
+        resignButton.disableProperty().bind(matchRunning.not());
+        backToSimulationButton.disableProperty().bind(simulationRunning);
         depthSpinner.disableProperty().bind(simulationRunning.or(matchRunning));
         timeLimitSpinner.disableProperty().bind(simulationRunning.or(matchRunning));
         minThinkTimeSpinner.disableProperty().bind(simulationRunning.or(matchRunning));
@@ -610,12 +628,37 @@ public final class VisualizerApp extends Application {
             aiMoveTask.cancel(true);
             aiMoveTask = null;
         }
+        activeGameState = null;
+        activeFirstBits = 0L;
+        activeSecondBits = 0L;
+        expectedAiPly = 0;
         boardView.setInteractive(false);
         boardView.setAvailableCellsMask(0L);
-        progressBar.progressProperty().unbind();
-        statusLabel.textProperty().unbind();
-        progressBar.setProgress(0);
-        statusLabel.setText("Ready");
+        resetStatusIndicators("Ready", 0);
+    }
+
+    private void restartMatch() {
+        pausePlayback();
+        stopMatch();
+        resetToInitialFrame();
+        startMatch();
+    }
+
+    private void resignMatch() {
+        if (!matchRunning.get()) {
+            return;
+        }
+        pausePlayback();
+        stopMatch();
+        resetToInitialFrame();
+        statusLabel.setText("You resigned");
+        progressBar.setProgress(1.0);
+    }
+
+    private void returnToSimulationMode() {
+        pausePlayback();
+        stopMatch();
+        resetToInitialFrame();
     }
 
     private void proceedWithCurrentTurn() {
@@ -857,6 +900,22 @@ public final class VisualizerApp extends Application {
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
         simulationFuture = null;
+    }
+
+    private void resetStatusIndicators(String message, double progress) {
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressBar.setProgress(progress);
+        statusLabel.setText(message);
+    }
+
+    private void resetToInitialFrame() {
+        GameFrame initialFrame = GameFrame.initial(new GameState(), transpositionTable);
+        frames.setAll(initialFrame);
+        currentIndex.set(0);
+        currentFrame.set(initialFrame);
+        boardView.setAvailableCellsMask(0L);
+        boardView.setInteractive(false);
     }
 
     private void configureSearchMode(List<String> args) {
