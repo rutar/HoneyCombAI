@@ -6,6 +6,7 @@ import com.honeycomb.core.ai.SearchConstraints;
 import com.honeycomb.core.ai.SearchResult;
 import com.honeycomb.core.ai.SearchTelemetry;
 import com.honeycomb.core.ai.TranspositionTable;
+import com.honeycomb.core.Board;
 import com.honeycomb.visualizer.model.GameFrame;
 import com.honeycomb.visualizer.simulation.TrainingSimulationTask;
 import com.honeycomb.visualizer.ui.BoardView;
@@ -52,6 +53,7 @@ public final class VisualizerApp extends Application {
     private static final Duration DEFAULT_TIME_LIMIT = Duration.ofMillis(2000);
     private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(75);
     private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
+    private static final long FULL_BOARD_MASK = -1L >>> (64 - Board.CELL_COUNT);
 
     private enum ControllerType {
         HUMAN("Human"),
@@ -491,6 +493,7 @@ public final class VisualizerApp extends Application {
             aiMoveFuture = null;
         }
         boardView.setInteractive(false);
+        boardView.setAvailableCellsMask(0L);
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
         progressBar.setProgress(0);
@@ -498,6 +501,7 @@ public final class VisualizerApp extends Application {
     }
 
     private void proceedWithCurrentTurn() {
+        boardView.setAvailableCellsMask(0L);
         if (!matchRunning.get() || activeGameState == null) {
             boardView.setInteractive(false);
             return;
@@ -512,6 +516,7 @@ public final class VisualizerApp extends Application {
             aiTurnInProgress.set(false);
             progressBar.setProgress(0);
             statusLabel.setText("Your move");
+            boardView.setAvailableCellsMask(computeAvailableCellsMask(activeGameState));
             boardView.setInteractive(true);
         }
     }
@@ -520,6 +525,7 @@ public final class VisualizerApp extends Application {
         matchRunning.set(false);
         aiTurnInProgress.set(false);
         boardView.setInteractive(false);
+        boardView.setAvailableCellsMask(0L);
         progressBar.setProgress(1.0);
         statusLabel.setText(message);
     }
@@ -534,6 +540,14 @@ public final class VisualizerApp extends Application {
         return matchRunning.get() && !isAiTurn();
     }
 
+    private long computeAvailableCellsMask(GameState state) {
+        if (state == null) {
+            return 0L;
+        }
+        long boardBits = state.getBoard().getBits();
+        return (~boardBits) & FULL_BOARD_MASK;
+    }
+
     private void handleHumanMove(int cellIndex) {
         if (!matchRunning.get() || aiTurnInProgress.get() || activeGameState == null) {
             return;
@@ -542,6 +556,10 @@ public final class VisualizerApp extends Application {
             return;
         }
         if (!activeGameState.getBoard().isEmpty(cellIndex)) {
+            return;
+        }
+        long availableMask = computeAvailableCellsMask(activeGameState);
+        if (((availableMask >>> cellIndex) & 1L) == 0L) {
             return;
         }
         applyMove(cellIndex, 0L, false, SearchTelemetry.empty());
