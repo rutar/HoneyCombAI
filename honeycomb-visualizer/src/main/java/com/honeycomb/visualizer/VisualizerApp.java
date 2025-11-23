@@ -3,6 +3,8 @@ package com.honeycomb.visualizer;
 import com.honeycomb.core.GameState;
 import com.honeycomb.core.ai.NegamaxAI;
 import com.honeycomb.core.ai.SearchConstraints;
+import com.honeycomb.core.ai.SearchResult;
+import com.honeycomb.core.ai.SearchTelemetry;
 import com.honeycomb.core.ai.TranspositionTable;
 import com.honeycomb.visualizer.model.GameFrame;
 import com.honeycomb.visualizer.simulation.TrainingSimulationTask;
@@ -50,11 +52,30 @@ public final class VisualizerApp extends Application {
     private static final Duration DEFAULT_TIME_LIMIT = Duration.ofMillis(2000);
     private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(75);
     private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
+
+    private enum ControllerType {
+        HUMAN("Human"),
+        AI("AI");
+
+        private final String label;
+
+        ControllerType(String label) {
+            this.label = label;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
     private final ObservableList<GameFrame> frames = FXCollections.observableArrayList();
     private final IntegerProperty currentIndex = new SimpleIntegerProperty(0);
     private final ObjectProperty<GameFrame> currentFrame = new SimpleObjectProperty<>();
     private final BooleanProperty playing = new SimpleBooleanProperty(false);
     private final BooleanProperty simulationRunning = new SimpleBooleanProperty(false);
+    private final BooleanProperty matchRunning = new SimpleBooleanProperty(false);
+    private final BooleanProperty aiTurnInProgress = new SimpleBooleanProperty(false);
     private final ObjectProperty<TranspositionTable.PersistenceStatus> tableStatus =
             new SimpleObjectProperty<>(TranspositionTable.PersistenceStatus.NOT_LOADED);
 
@@ -66,10 +87,22 @@ public final class VisualizerApp extends Application {
     private StatsPane statsPane;
     private Spinner<Integer> depthSpinner;
     private ComboBox<SearchConstraints.SearchMode> searchModeComboBox;
+    private ComboBox<ControllerType> firstControllerComboBox;
+    private ComboBox<ControllerType> secondControllerComboBox;
     private ProgressBar progressBar;
     private Label statusLabel;
     private Spinner<Integer> minThinkTimeSpinner;
     private Spinner<Integer> timeLimitSpinner;
+    private Button startGameButton;
+    private Button stopGameButton;
+    private GameState activeGameState;
+    private long activeFirstBits;
+    private long activeSecondBits;
+    private int matchDepthLimit = DEFAULT_DEPTH;
+    private Duration matchTimeLimit = DEFAULT_TIME_LIMIT;
+    private Duration matchMinThinkTime = DEFAULT_MIN_THINK_TIME;
+    private CompletableFuture<SearchResult> aiMoveFuture;
+    private int expectedAiPly;
     private CompletableFuture<List<GameFrame>> simulationFuture;
 
     public static void main(String[] args) {
@@ -88,6 +121,8 @@ public final class VisualizerApp extends Application {
         this.ai.setMode(searchMode);
 
         boardView = new BoardView();
+        boardView.setInteractive(false);
+        boardView.setOnCellClicked(this::handleHumanMove);
         statsPane = new StatsPane();
         statsPane.bindTableStatus(tableStatus);
 
@@ -183,6 +218,12 @@ public final class VisualizerApp extends Application {
         Button simulateButton = new Button("Run simulation");
         simulateButton.setOnAction(event -> runSimulation(depthSpinner.getValue()));
 
+        startGameButton = new Button("Start game");
+        startGameButton.setOnAction(event -> startMatch());
+
+        stopGameButton = new Button("Stop game");
+        stopGameButton.setOnAction(event -> stopMatch());
+
         Button previousButton = new Button("⏮");
         previousButton.setOnAction(event -> {
             pausePlayback();
@@ -261,6 +302,14 @@ public final class VisualizerApp extends Application {
         minThinkTimeSpinner.setEditable(true);
         minThinkTimeSpinner.setPrefWidth(100);
 
+        firstControllerComboBox = new ComboBox<>();
+        firstControllerComboBox.getItems().setAll(ControllerType.values());
+        firstControllerComboBox.setValue(ControllerType.HUMAN);
+
+        secondControllerComboBox = new ComboBox<>();
+        secondControllerComboBox.getItems().setAll(ControllerType.values());
+        secondControllerComboBox.setValue(ControllerType.AI);
+
         progressBar = new ProgressBar(0);
         progressBar.setPrefWidth(180);
 
@@ -278,6 +327,8 @@ public final class VisualizerApp extends Application {
 
         HBox controls = new HBox(12,
                 simulateButton,
+                startGameButton,
+                stopGameButton,
                 new Label("Depth:"),
                 depthSpinner,
                 new Label("Search mode:"),
@@ -286,6 +337,10 @@ public final class VisualizerApp extends Application {
                 timeLimitSpinner,
                 new Label("Min. think time (ms):"),
                 minThinkTimeSpinner,
+                new Label("First:"),
+                firstControllerComboBox,
+                new Label("Second:"),
+                secondControllerComboBox,
                 navigation,
                 spacer,
                 progressBar,
@@ -299,13 +354,16 @@ public final class VisualizerApp extends Application {
                 () -> frames.isEmpty() || currentIndex.get() >= frames.size() - 1, currentIndex, frameCount));
         resetButton.disableProperty().bind(Bindings.createBooleanBinding(
                 () -> frames.isEmpty() || currentIndex.get() == 0, currentIndex, frameCount));
-        playButton.disableProperty().bind(playing.or(frameCount.lessThanOrEqualTo(1)).or(simulationRunning));
+        playButton.disableProperty().bind(playing.or(frameCount.lessThanOrEqualTo(1)).or(simulationRunning)
+                .or(matchRunning).or(aiTurnInProgress));
         pauseButton.disableProperty().bind(playing.not());
-        simulateButton.disableProperty().bind(simulationRunning.or(tableReady.not()));
-        depthSpinner.disableProperty().bind(simulationRunning);
-        timeLimitSpinner.disableProperty().bind(simulationRunning);
-        minThinkTimeSpinner.disableProperty().bind(simulationRunning);
-        searchModeComboBox.disableProperty().bind(simulationRunning);
+        simulateButton.disableProperty().bind(simulationRunning.or(tableReady.not()).or(matchRunning));
+        startGameButton.disableProperty().bind(simulationRunning.or(tableReady.not()).or(matchRunning));
+        stopGameButton.disableProperty().bind(matchRunning.not());
+        depthSpinner.disableProperty().bind(simulationRunning.or(matchRunning));
+        timeLimitSpinner.disableProperty().bind(simulationRunning.or(matchRunning));
+        minThinkTimeSpinner.disableProperty().bind(simulationRunning.or(matchRunning));
+        searchModeComboBox.disableProperty().bind(simulationRunning.or(matchRunning));
 
         return controls;
     }
@@ -357,6 +415,7 @@ public final class VisualizerApp extends Application {
             return;
         }
         pausePlayback();
+        stopMatch();
 
         Duration timeLimit = Duration.ofMillis(Math.max(0, normalizeSpinnerValue(timeLimitSpinner)));
         Duration minThinkTime = Duration.ofMillis(Math.max(0, normalizeSpinnerValue(minThinkTimeSpinner)));
@@ -390,6 +449,175 @@ public final class VisualizerApp extends Application {
         Thread thread = new Thread(task, "honeycomb-visualizer-simulation");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private void startMatch() {
+        if (tableStatus.get() != TranspositionTable.PersistenceStatus.READY) {
+            return;
+        }
+        pausePlayback();
+        stopMatch();
+
+        matchDepthLimit = Math.max(1, normalizeSpinnerValue(depthSpinner));
+        matchTimeLimit = Duration.ofMillis(Math.max(0, normalizeSpinnerValue(timeLimitSpinner)));
+        matchMinThinkTime = Duration.ofMillis(Math.max(0, normalizeSpinnerValue(minThinkTimeSpinner)));
+
+        this.ai = new NegamaxAI(MAX_DEPTH, matchTimeLimit, matchMinThinkTime, transpositionTable);
+        this.ai.setMode(searchMode);
+
+        activeGameState = new GameState();
+        activeFirstBits = 0L;
+        activeSecondBits = 0L;
+
+        GameFrame initialFrame = GameFrame.initial(activeGameState, transpositionTable);
+        frames.setAll(initialFrame);
+        currentIndex.set(0);
+        currentFrame.set(initialFrame);
+
+        matchRunning.set(true);
+        aiTurnInProgress.set(false);
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressBar.setProgress(0);
+        statusLabel.setText("Game started");
+        proceedWithCurrentTurn();
+    }
+
+    private void stopMatch() {
+        matchRunning.set(false);
+        aiTurnInProgress.set(false);
+        if (aiMoveFuture != null) {
+            aiMoveFuture.cancel(true);
+            aiMoveFuture = null;
+        }
+        boardView.setInteractive(false);
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressBar.setProgress(0);
+        statusLabel.setText("Ready");
+    }
+
+    private void proceedWithCurrentTurn() {
+        if (!matchRunning.get() || activeGameState == null) {
+            boardView.setInteractive(false);
+            return;
+        }
+        if (activeGameState.isGameOver()) {
+            finishMatch("Game over");
+            return;
+        }
+        if (isAiTurn()) {
+            runAiTurn();
+        } else {
+            aiTurnInProgress.set(false);
+            progressBar.setProgress(0);
+            statusLabel.setText("Your move");
+            boardView.setInteractive(true);
+        }
+    }
+
+    private void finishMatch(String message) {
+        matchRunning.set(false);
+        aiTurnInProgress.set(false);
+        boardView.setInteractive(false);
+        progressBar.setProgress(1.0);
+        statusLabel.setText(message);
+    }
+
+    private boolean isAiTurn() {
+        boolean firstToMove = activeGameState.getBoard().isFirstPlayer();
+        ControllerType controller = firstToMove ? firstControllerComboBox.getValue() : secondControllerComboBox.getValue();
+        return controller == ControllerType.AI;
+    }
+
+    private boolean isHumanTurn() {
+        return matchRunning.get() && !isAiTurn();
+    }
+
+    private void handleHumanMove(int cellIndex) {
+        if (!matchRunning.get() || aiTurnInProgress.get() || activeGameState == null) {
+            return;
+        }
+        if (!isHumanTurn()) {
+            return;
+        }
+        if (!activeGameState.getBoard().isEmpty(cellIndex)) {
+            return;
+        }
+        applyMove(cellIndex, 0L, false, SearchTelemetry.empty());
+    }
+
+    private void runAiTurn() {
+        if (!matchRunning.get() || activeGameState == null) {
+            return;
+        }
+        aiTurnInProgress.set(true);
+        boardView.setInteractive(false);
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+        statusLabel.setText("AI thinking...");
+
+        expectedAiPly = activeGameState.getMoveNumber();
+        SearchConstraints constraints = new SearchConstraints(matchDepthLimit, matchTimeLimit, searchMode);
+        aiMoveFuture = CompletableFuture.supplyAsync(() -> ai.search(activeGameState, constraints));
+        aiMoveFuture.thenAccept(result -> Platform.runLater(() -> handleAiResult(expectedAiPly, result)))
+                .exceptionally(error -> {
+                    Platform.runLater(() -> handleAiFailure(error));
+                    return null;
+                });
+    }
+
+    private void handleAiResult(int expectedPly, SearchResult result) {
+        aiTurnInProgress.set(false);
+        progressBar.setProgress(0);
+        if (!matchRunning.get() || activeGameState == null) {
+            return;
+        }
+        if (expectedPly != activeGameState.getMoveNumber()) {
+            return;
+        }
+        applyMove(result.move(), result.visitedNodes(), result.timedOut(), result.telemetry());
+    }
+
+    private void handleAiFailure(Throwable error) {
+        aiTurnInProgress.set(false);
+        progressBar.setProgress(0);
+        statusLabel.setText("AI error");
+        if (error != null) {
+            LOGGER.log(Level.SEVERE, "AI move failed", error);
+        }
+        stopMatch();
+        statusLabel.setText("AI error");
+    }
+
+    private void applyMove(int move, long visitedNodes, boolean timedOut, SearchTelemetry telemetry) {
+        if (activeGameState == null) {
+            return;
+        }
+        boolean firstToMove = activeGameState.getBoard().isFirstPlayer();
+        if (firstToMove) {
+            activeFirstBits |= (1L << move);
+        } else {
+            activeSecondBits |= (1L << move);
+        }
+
+        activeGameState = activeGameState.applyMove(move);
+        GameFrame frame = new GameFrame(
+                activeGameState,
+                move,
+                activeFirstBits,
+                activeSecondBits,
+                visitedNodes,
+                timedOut,
+                telemetry,
+                transpositionTable.getLastUpdate(),
+                transpositionTable.size(),
+                activeGameState.getMoveNumber());
+        frames.add(frame);
+        currentIndex.set(frames.size() - 1);
+        currentFrame.set(frame);
+        proceedWithCurrentTurn();
     }
 
     private int normalizeSpinnerValue(Spinner<Integer> spinner) {
