@@ -37,6 +37,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
@@ -44,6 +45,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
 
@@ -55,6 +57,7 @@ public final class VisualizerApp extends Application {
     private static final Duration DEFAULT_MIN_THINK_TIME = Duration.ofMillis(75);
     private static final Logger LOGGER = Logger.getLogger(VisualizerApp.class.getName());
     private static final long FULL_BOARD_MASK = -1L >>> (64 - Board.CELL_COUNT);
+    private static final int MAX_HISTORY_ITEMS = 50;
 
     private enum ControllerType {
         HUMAN("Human"),
@@ -98,6 +101,10 @@ public final class VisualizerApp extends Application {
     private Spinner<Integer> timeLimitSpinner;
     private Button startGameButton;
     private Button stopGameButton;
+    private Label scoreLabel;
+    private Label lastMoveLabel;
+    private Label moveNumberLabel;
+    private ListView<String> moveHistoryView;
     private GameState activeGameState;
     private long activeFirstBits;
     private long activeSecondBits;
@@ -135,6 +142,7 @@ public final class VisualizerApp extends Application {
         currentFrame.addListener((obs, oldFrame, newFrame) -> {
             boardView.update(newFrame);
             statsPane.update(newFrame);
+            updateGameInfo(newFrame);
         });
 
         GameFrame initialFrame = GameFrame.initial(new GameState(), transpositionTable);
@@ -149,9 +157,10 @@ public final class VisualizerApp extends Application {
         root.setRight(statsPane);
         BorderPane.setMargin(statsPane, new Insets(0, 0, 0, 16));
 
-        HBox controls = buildControls();
-        root.setBottom(controls);
-        BorderPane.setMargin(controls, new Insets(16, 0, 0, 0));
+        VBox bottomPanel = new VBox(10, buildGameInfoPanel(), buildHistoryPanel(), buildControls());
+        bottomPanel.setAlignment(Pos.CENTER_LEFT);
+        root.setBottom(bottomPanel);
+        BorderPane.setMargin(bottomPanel, new Insets(16, 0, 0, 0));
 
         Scene scene = new Scene(root, 1200, 800);
         stage.setTitle("Honeycomb Visualizer");
@@ -369,6 +378,114 @@ public final class VisualizerApp extends Application {
         searchModeComboBox.disableProperty().bind(simulationRunning.or(matchRunning));
 
         return controls;
+    }
+
+    private VBox buildGameInfoPanel() {
+        scoreLabel = infoValueLabel();
+        lastMoveLabel = infoValueLabel();
+        moveNumberLabel = infoValueLabel();
+
+        HBox infoBar = new HBox(16,
+                labeledInfo("Score", scoreLabel),
+                labeledInfo("Last move", lastMoveLabel),
+                labeledInfo("Move #", moveNumberLabel));
+        infoBar.setAlignment(Pos.CENTER_LEFT);
+
+        VBox wrapper = new VBox(6, infoBar);
+        wrapper.setAlignment(Pos.CENTER_LEFT);
+        wrapper.setPadding(new Insets(0, 4, 0, 4));
+
+        updateGameInfo(currentFrame.get());
+        return wrapper;
+    }
+
+    private VBox buildHistoryPanel() {
+        Label title = new Label("Move history");
+        title.setStyle("-fx-font-weight: 600; -fx-text-fill: #1f2333;");
+
+        moveHistoryView = new ListView<>();
+        moveHistoryView.setPrefHeight(120);
+        moveHistoryView.setFocusTraversable(false);
+        moveHistoryView.setPlaceholder(new Label("No moves yet"));
+
+        VBox wrapper = new VBox(6, title, moveHistoryView);
+        wrapper.setAlignment(Pos.CENTER_LEFT);
+        wrapper.setPadding(new Insets(0, 4, 0, 4));
+        return wrapper;
+    }
+
+    private Label infoValueLabel() {
+        Label label = new Label("—");
+        label.setStyle("-fx-font-size: 14px; -fx-font-weight: 700; -fx-text-fill: #1f2333;");
+        label.setMinWidth(80);
+        return label;
+    }
+
+    private HBox labeledInfo(String caption, Label value) {
+        Label label = new Label(caption + ":");
+        label.setStyle("-fx-text-fill: #4a4f64; -fx-font-weight: 600;");
+        HBox box = new HBox(6, label, value);
+        box.setAlignment(Pos.CENTER_LEFT);
+        return box;
+    }
+
+    private void updateGameInfo(GameFrame frame) {
+        if (scoreLabel == null || lastMoveLabel == null || moveNumberLabel == null) {
+            return;
+        }
+        if (frame == null) {
+            scoreLabel.setText("—");
+            lastMoveLabel.setText("—");
+            moveNumberLabel.setText("—");
+            if (moveHistoryView != null) {
+                moveHistoryView.getItems().clear();
+            }
+            return;
+        }
+        scoreLabel.setText(String.format("%d : %d", frame.state().getScore(true), frame.state().getScore(false)));
+        moveNumberLabel.setText(Integer.toString(frame.ply()));
+        if (frame.hasLastMove()) {
+            boolean lastByFirst = !frame.state().getBoard().isFirstPlayer();
+            lastMoveLabel.setText(String.format("%d (%s)", frame.lastMove(), lastByFirst ? "first" : "second"));
+        } else {
+            lastMoveLabel.setText("—");
+        }
+        updateMoveHistory();
+    }
+
+    private void updateMoveHistory() {
+        if (moveHistoryView == null) {
+            return;
+        }
+        if (frames.isEmpty()) {
+            moveHistoryView.getItems().clear();
+            return;
+        }
+        int endIndex = Math.min(currentIndex.get(), frames.size() - 1);
+        ObservableList<String> items = FXCollections.observableArrayList();
+        for (int i = 0; i <= endIndex; i++) {
+            GameFrame frame = frames.get(i);
+            if (!frame.hasLastMove()) {
+                continue;
+            }
+            boolean lastByFirst = !frame.state().getBoard().isFirstPlayer();
+            String entry = String.format("%02d. %s → %d (%d:%d)",
+                    frame.ply(),
+                    lastByFirst ? "First" : "Second",
+                    frame.lastMove(),
+                    frame.state().getScore(true),
+                    frame.state().getScore(false));
+            items.add(entry);
+        }
+        if (items.size() > MAX_HISTORY_ITEMS) {
+            items = FXCollections.observableArrayList(items.subList(items.size() - MAX_HISTORY_ITEMS, items.size()));
+        }
+        moveHistoryView.setItems(items);
+        if (!items.isEmpty()) {
+            int last = items.size() - 1;
+            moveHistoryView.getSelectionModel().select(last);
+            moveHistoryView.scrollTo(last);
+        }
     }
 
     private void startPlayback() {
