@@ -696,7 +696,7 @@ public final class VisualizerApp extends Application {
         expectedAiPly = activeGameState.getMoveNumber();
         SearchConstraints constraints = new SearchConstraints(matchDepthLimit, matchTimeLimit, searchMode);
 
-        aiMoveTask = new Task<>() {
+        Task<SearchResult> task = new Task<>() {
             @Override
             protected SearchResult call() {
                 updateMessage("AI thinking...");
@@ -705,36 +705,41 @@ public final class VisualizerApp extends Application {
             }
         };
 
-        progressBar.progressProperty().bind(aiMoveTask.progressProperty());
-        statusLabel.textProperty().bind(aiMoveTask.messageProperty());
+        aiMoveTask = task;
 
-        aiMoveTask.setOnSucceeded(event -> {
-            cleanupAiTaskBindings();
-            SearchResult result = aiMoveTask.getValue();
+        progressBar.progressProperty().bind(task.progressProperty());
+        statusLabel.textProperty().bind(task.messageProperty());
+
+        task.setOnSucceeded(event -> {
+            SearchResult result = task.getValue();
+            cleanupAiTaskBindings(task);
             Platform.runLater(() -> handleAiResult(expectedAiPly, result));
         });
 
-        aiMoveTask.setOnFailed(event -> {
-            cleanupAiTaskBindings();
-            Platform.runLater(() -> handleAiFailure(aiMoveTask.getException()));
+        task.setOnFailed(event -> {
+            Throwable error = task.getException();
+            cleanupAiTaskBindings(task);
+            Platform.runLater(() -> handleAiFailure(error));
         });
 
-        aiMoveTask.setOnCancelled(event -> {
-            cleanupAiTaskBindings();
+        task.setOnCancelled(event -> {
+            cleanupAiTaskBindings(task);
             aiTurnInProgress.set(false);
             Platform.runLater(() -> statusLabel.setText("AI cancelled"));
         });
 
-        Thread thread = new Thread(aiMoveTask, "honeycomb-visualizer-ai-turn");
+        Thread thread = new Thread(task, "honeycomb-visualizer-ai-turn");
         thread.setDaemon(true);
         thread.start();
     }
 
-    private void cleanupAiTaskBindings() {
+    private void cleanupAiTaskBindings(Task<?> task) {
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
         progressBar.setProgress(0);
-        aiMoveTask = null;
+        if (aiMoveTask == task) {
+            aiMoveTask = null;
+        }
     }
 
     private void handleAiResult(int expectedPly, SearchResult result) {
