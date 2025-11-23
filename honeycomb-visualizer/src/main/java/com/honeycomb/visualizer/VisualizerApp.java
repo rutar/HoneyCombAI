@@ -30,6 +30,7 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -103,7 +104,7 @@ public final class VisualizerApp extends Application {
     private int matchDepthLimit = DEFAULT_DEPTH;
     private Duration matchTimeLimit = DEFAULT_TIME_LIMIT;
     private Duration matchMinThinkTime = DEFAULT_MIN_THINK_TIME;
-    private CompletableFuture<SearchResult> aiMoveFuture;
+    private Task<SearchResult> aiMoveTask;
     private int expectedAiPly;
     private CompletableFuture<List<GameFrame>> simulationFuture;
 
@@ -488,9 +489,9 @@ public final class VisualizerApp extends Application {
     private void stopMatch() {
         matchRunning.set(false);
         aiTurnInProgress.set(false);
-        if (aiMoveFuture != null) {
-            aiMoveFuture.cancel(true);
-            aiMoveFuture = null;
+        if (aiMoveTask != null) {
+            aiMoveTask.cancel(true);
+            aiMoveTask = null;
         }
         boardView.setInteractive(false);
         boardView.setAvailableCellsMask(0L);
@@ -571,19 +572,52 @@ public final class VisualizerApp extends Application {
         }
         aiTurnInProgress.set(true);
         boardView.setInteractive(false);
+        boardView.setAvailableCellsMask(0L);
         progressBar.progressProperty().unbind();
         statusLabel.textProperty().unbind();
-        progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
-        statusLabel.setText("AI thinking...");
 
         expectedAiPly = activeGameState.getMoveNumber();
         SearchConstraints constraints = new SearchConstraints(matchDepthLimit, matchTimeLimit, searchMode);
-        aiMoveFuture = CompletableFuture.supplyAsync(() -> ai.search(activeGameState, constraints));
-        aiMoveFuture.thenAccept(result -> Platform.runLater(() -> handleAiResult(expectedAiPly, result)))
-                .exceptionally(error -> {
-                    Platform.runLater(() -> handleAiFailure(error));
-                    return null;
-                });
+
+        aiMoveTask = new Task<>() {
+            @Override
+            protected SearchResult call() {
+                updateMessage("AI thinking...");
+                updateProgress(-1, 1);
+                return ai.search(activeGameState, constraints);
+            }
+        };
+
+        progressBar.progressProperty().bind(aiMoveTask.progressProperty());
+        statusLabel.textProperty().bind(aiMoveTask.messageProperty());
+
+        aiMoveTask.setOnSucceeded(event -> {
+            cleanupAiTaskBindings();
+            SearchResult result = aiMoveTask.getValue();
+            Platform.runLater(() -> handleAiResult(expectedAiPly, result));
+        });
+
+        aiMoveTask.setOnFailed(event -> {
+            cleanupAiTaskBindings();
+            Platform.runLater(() -> handleAiFailure(aiMoveTask.getException()));
+        });
+
+        aiMoveTask.setOnCancelled(event -> {
+            cleanupAiTaskBindings();
+            aiTurnInProgress.set(false);
+            Platform.runLater(() -> statusLabel.setText("AI cancelled"));
+        });
+
+        Thread thread = new Thread(aiMoveTask, "honeycomb-visualizer-ai-turn");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void cleanupAiTaskBindings() {
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressBar.setProgress(0);
+        aiMoveTask = null;
     }
 
     private void handleAiResult(int expectedPly, SearchResult result) {
