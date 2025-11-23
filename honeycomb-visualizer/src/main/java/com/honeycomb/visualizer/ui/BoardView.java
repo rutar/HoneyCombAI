@@ -62,6 +62,9 @@ public final class BoardView extends Pane {
     private double contentWidth;
     private double contentHeight;
     private long currentBoardBits = INITIAL_BOARD_BITS;
+    private long currentFirstBits;
+    private long currentSecondBits;
+    private long availableCellsMask;
     private int currentPly = -1;
     private IntConsumer cellClickHandler;
     private boolean interactive;
@@ -155,6 +158,11 @@ public final class BoardView extends Pane {
         this.interactive = interactive;
     }
 
+    public void setAvailableCellsMask(long mask) {
+        availableCellsMask = mask & FULL_BOARD_MASK;
+        refreshCellFills();
+    }
+
     private void handleCellClick(int index) {
         if (!interactive || cellClickHandler == null) {
             return;
@@ -163,6 +171,9 @@ public final class BoardView extends Pane {
             return;
         }
         if (((currentBoardBits >>> index) & 1L) != 0L) {
+            return;
+        }
+        if (((availableCellsMask >>> index) & 1L) == 0L) {
             return;
         }
         cellClickHandler.accept(index);
@@ -181,6 +192,9 @@ public final class BoardView extends Pane {
             resetLineState();
             lastMoveMarker.setVisible(false);
             currentBoardBits = INITIAL_BOARD_BITS;
+            currentFirstBits = 0L;
+            currentSecondBits = 0L;
+            availableCellsMask = 0L;
             currentPly = -1;
             return;
         }
@@ -188,31 +202,13 @@ public final class BoardView extends Pane {
         long firstBits = frame.firstPlayerBits();
         long secondBits = frame.secondPlayerBits();
         long boardBits = frame.state().getBoard().getBits();
-        long available = (~boardBits) & FULL_BOARD_MASK;
         int lastMove = frame.lastMove();
         boolean hasLastMove = frame.hasLastMove();
 
-        for (int index = 0; index < cells.length; index++) {
-            Polygon cell = cells[index];
-            if (cell == null) {
-                continue;
-            }
+        currentFirstBits = firstBits;
+        currentSecondBits = secondBits;
 
-            Paint fill;
-            if (((firstBits >>> index) & 1L) != 0L) {
-                fill = FIRST_PLAYER_FILL;
-            } else if (((secondBits >>> index) & 1L) != 0L) {
-                fill = SECOND_PLAYER_FILL;
-            } else if (((available >>> index) & 1L) != 0L) {
-                fill = AVAILABLE_FILL;
-            } else {
-                fill = EMPTY_FILL;
-            }
-
-            cell.setFill(fill);
-            cell.setStroke(GRID_STROKE);
-            cell.setStrokeWidth(DEFAULT_STROKE_WIDTH);
-        }
+        applyCellFills(firstBits, secondBits);
 
         updateCellLabelVisibility(boardBits);
         updateLineOverlays(frame, firstBits, secondBits, boardBits);
@@ -231,6 +227,34 @@ public final class BoardView extends Pane {
         double offsetX = insets.getLeft() + (availableWidth - contentWidth) / 2.0;
         double offsetY = insets.getTop() + (availableHeight - contentHeight) / 2.0;
         boardGroup.relocate(offsetX, offsetY);
+    }
+
+    private void applyCellFills(long firstBits, long secondBits) {
+        for (int index = 0; index < cells.length; index++) {
+            Polygon cell = cells[index];
+            if (cell == null) {
+                continue;
+            }
+
+            Paint fill;
+            if (((firstBits >>> index) & 1L) != 0L) {
+                fill = FIRST_PLAYER_FILL;
+            } else if (((secondBits >>> index) & 1L) != 0L) {
+                fill = SECOND_PLAYER_FILL;
+            } else if (((availableCellsMask >>> index) & 1L) != 0L) {
+                fill = AVAILABLE_FILL;
+            } else {
+                fill = EMPTY_FILL;
+            }
+
+            cell.setFill(fill);
+            cell.setStroke(GRID_STROKE);
+            cell.setStrokeWidth(DEFAULT_STROKE_WIDTH);
+        }
+    }
+
+    private void refreshCellFills() {
+        applyCellFills(currentFirstBits, currentSecondBits);
     }
 
     private void createCellLabels() {
