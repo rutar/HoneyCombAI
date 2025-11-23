@@ -3,6 +3,12 @@ package com.honeycomb.visualizer.ui;
 import com.honeycomb.core.Board;
 import com.honeycomb.core.ScoreCalculator;
 import com.honeycomb.visualizer.model.GameFrame;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.IntConsumer;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.VPos;
@@ -19,11 +25,6 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Visual representation of the Honeycomb playing field.
@@ -60,8 +61,10 @@ public final class BoardView extends Pane {
     private final Circle lastMoveMarker;
     private double contentWidth;
     private double contentHeight;
-    private long currentBoardBits;
+    private long currentBoardBits = INITIAL_BOARD_BITS;
     private int currentPly = -1;
+    private IntConsumer cellClickHandler;
+    private boolean interactive;
 
     public BoardView() {
         setPadding(new Insets(16));
@@ -86,6 +89,8 @@ public final class BoardView extends Pane {
                 cells[index] = hex;
                 this.centerX[index] = centerX;
                 this.centerY[index] = centerY;
+                int cellIndex = index;
+                hex.setOnMouseClicked(event -> handleCellClick(cellIndex));
                 boardGroup.getChildren().add(hex);
 
                 var points = hex.getPoints();
@@ -142,6 +147,27 @@ public final class BoardView extends Pane {
         setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
     }
 
+    public void setOnCellClicked(IntConsumer handler) {
+        this.cellClickHandler = handler;
+    }
+
+    public void setInteractive(boolean interactive) {
+        this.interactive = interactive;
+    }
+
+    private void handleCellClick(int index) {
+        if (!interactive || cellClickHandler == null) {
+            return;
+        }
+        if (Board.isBlockedCell(index)) {
+            return;
+        }
+        if (((currentBoardBits >>> index) & 1L) != 0L) {
+            return;
+        }
+        cellClickHandler.accept(index);
+    }
+
     public void update(GameFrame frame) {
         if (frame == null) {
             for (Polygon cell : cells) {
@@ -154,6 +180,8 @@ public final class BoardView extends Pane {
             updateCellLabelVisibility(INITIAL_BOARD_BITS);
             resetLineState();
             lastMoveMarker.setVisible(false);
+            currentBoardBits = INITIAL_BOARD_BITS;
+            currentPly = -1;
             return;
         }
 
